@@ -219,6 +219,6 @@ conda deactivate
 
 #Rezip unzipped files
 if [ "${SUFFIX1}" == ".fastq.gz" ]; then
-	gzip ${OUTPUTDIR}*"trimmed.fastq"; fi
+	rm ${OUTPUTDIR}*"trimmed.fastq"; fi
 echo "Pre-processing of data complete"
 
