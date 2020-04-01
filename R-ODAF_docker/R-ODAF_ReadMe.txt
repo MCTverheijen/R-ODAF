@@ -14,7 +14,6 @@
 # RUNNING THE DOCKER:
 # Step 1: Start the docker
 (sudo) docker run -v /Put_Here_The_Work_Directory_On_Your_System:/data -it rodaf_sequencing
-sudo docker run -v /ngs-data-2/data/CEFIC/CEFIC_scripts/Docker:/data -it rodaf_sequencing
 
 # Step 2: Make sure all that the next files are located within the folder to which the docker is mounted (/Put_Here_The_Work_Directory_On_Your_System):
          # sample fastq files
