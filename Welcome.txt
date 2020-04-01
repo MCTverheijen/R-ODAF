@@ -1,0 +1,5 @@
+Dear future R-ODAF user,
+
+The CEFIC project has developed 3 R-ODAFs
+
+This Github contained scripts/files nessesary for the sequencing R-ODAF (applicable for both RNA-Seq and TempO-seq technology)
