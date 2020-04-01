@@ -3,6 +3,10 @@ Omics Data Analysis Framework for Regulatory application
 
 
   
+  
+  
+  
+  
 Dear future R-ODAF user,
 
 The CEFIC project has developed Omics Data Analysis Frameworks for Regulatory application (R-ODAFs) in order to supply robust and reproducible data analysis pipelines for transcriptomics analysis. While developed for regulatory purposes, the pipelines can also be applied for research purposes.
