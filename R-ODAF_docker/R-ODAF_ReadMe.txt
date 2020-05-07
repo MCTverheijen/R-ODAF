@@ -18,7 +18,7 @@
 # Step 2: Make sure all that the next files are located within the folder to which the docker is mounted (/Put_Here_The_Work_Directory_On_Your_System):
          # sample fastq files
          # genomefiles (fasta + gtf)
-         # scripts used by the docker (RUN_R-ODAF_sequencing.sh & R-ODAF_sequencing_DataPreprocessing.sh)
+         # script used by the docker (R-ODAF_sequencing_DataPreprocessing.sh)
 
 # Step 3: Adapt the top section of the R-ODAF_sequencing_DataPreprocessing.sh (parameters & filelocations)
 
