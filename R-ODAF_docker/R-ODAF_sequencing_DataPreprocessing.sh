@@ -53,6 +53,13 @@ CPU_FOR_OTHER=35
 declare BASEDIR=${OUTPUT_DIR}   #specify working directory
 #declare SEQMODE="single"   #specify "paired" or "single" end mode
 #declare RAW_SAMPLE_DIR=${BASEDIR}   #specify location of fastq files
+if [[ "${SUFFIX_INPUTFILES}" =~ ^\. ]]
+ then echo "Suffix has a leading period, continuing."
+ else 
+ echo "Suffix did not have a leading period, adding one now..."
+ SUFFIX_INPUTFILES=${SUFFIX_INPUTFILES/#/.}
+ echo ${SUFFIX_INPUTFILES}
+fi
 declare SUFFIX_IN=${SUFFIX_INPUTFILES} # specify extension of input files (".fastq", ".fastq.gz", etc.)
 
 #For paired end mode: specify the SUFFIXES used for read1 and read2 
@@ -87,7 +94,7 @@ declare align_DIR="${OUTPUTDIR}/STAR/"
 declare Quant_DIR="${OUTPUTDIR}/RSEM/"
 declare RSEM_GENOMEDIR="${GENOMEDIR}/RSEM/"
 
-declare SUFFIX1=${SUFFIX_IN} 
+declare SUFFIX1=${SUFFIX_IN}
 declare SUFFIX_out="_trimmed${SUFFIX_IN}"
 
 mkdir -p ${TRIMM_DIR}
@@ -221,7 +228,7 @@ for FILENAME in ${FILES1[@]}; do
 		echo "File exists, continuing"
 	else
 		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-${#PAIR1}}]" 
-		if [ ${SUFFIX1} == *".gz"$ ]; then
+		if [[ "${SUFFIX1}" == *".gz" ]]; then
 			echo "gzipped file detected, using zcat to read"
 			STAR \
 			--runThreadN ${CPUs_align} \
@@ -252,7 +259,7 @@ for FILENAME in ${FILES1[@]}; do
 	if [ -e ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}Log.final.out  ]; then
 		echo "File exists, continuing"
 		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}]" 
-		if [ ${SUFFIX1} == *".gz"$ ]; then
+		if [[ "${SUFFIX1}" == *".gz" ]]; then
 			echo "gzipped file detected, using zcat to read"
 			STAR \
 			--runThreadN ${CPUs_align} \
