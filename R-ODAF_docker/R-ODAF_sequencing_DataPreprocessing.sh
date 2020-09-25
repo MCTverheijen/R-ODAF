@@ -226,7 +226,7 @@ for FILENAME in ${FILES1[@]}; do
 			STAR \
 			--runThreadN ${CPUs_align} \
 			--genomeDir ${GENOMEDIR} \
-			--readFilesIn "${READ1}.${SUFFIX1}" \
+			--readFilesIn "${READ1}${SUFFIX1}" \
 			--quantMode TranscriptomeSAM \
 			--readFilesCommand zcat \
 			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
@@ -235,7 +235,7 @@ for FILENAME in ${FILES1[@]}; do
 			STAR \
 			--runThreadN ${CPUs_align} \
 			--genomeDir ${GENOMEDIR} \
-			--readFilesIn "${READ1}.${SUFFIX1}" \
+			--readFilesIn "${READ1}${SUFFIX1}" \
 			--quantMode TranscriptomeSAM \
 			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
 		fi
@@ -266,7 +266,7 @@ for FILENAME in ${FILES1[@]}; do
 			STAR \
 			--runThreadN ${CPUs_align} \
 			--genomeDir ${GENOMEDIR} \
-			--readFilesIn "${READ1}.${SUFFIX1}" "${READ2}.${SUFFIX1}" \
+			--readFilesIn "${READ1}${SUFFIX1}" "${READ2}${SUFFIX1}" \
 			--quantMode TranscriptomeSAM \
 			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
 		fi
@@ -336,10 +336,5 @@ source activate multiqc
 # multiqc ${QC_DIR_fastp} --filename MultiQC_Report.html --outdir ${QC_DIR_multiQC}
 multiqc --cl_config "extra_fn_clean_exts: { '_fastp.json' }" ${BASEDIR} --filename MultiQC_Report.html --outdir ${QC_DIR_multiQC}
 conda deactivate
-
-#Rezip unzipped files
-# if [ "${SUFFIX1}" == ".fastq.gz" ]; then
-	# rm ${OUTPUTDIR}*"trimmed.fastq"
-# fi
 
 echo "Pre-processing of data complete"
