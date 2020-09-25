@@ -12,37 +12,37 @@
 #          Script should say /data/Samples/
 
 #specify the directory for the output
-OUTPUT_DIR="/data/test/output/"
+OUTPUT_DIR="/data/output/"
 #specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
-RAW_SAMPLE_DIR="/data/test/"
+RAW_SAMPLE_DIR="/data/raw/"
 # specify extention of input files (".fastq" or ".fastq.gz") 
 SUFFIX_INPUTFILES='.fastq.gz' 
 #specify the sequencing mode used to obtain the data
 SEQMODE="single" #specify "paired" or "single" end mode
 # specify the read suffix (e.g. "_R1_001")
-PAIRED_END_SUFFIX_FORWARD="_R1_001"
+PAIRED_END_SUFFIX_FORWARD=""
 # *IF* paired end mode was used, specify the reverse suffix as well (e.g. "_R2")
 PAIRED_END_SUFFIX_REVERSE="_R2"
 #
 # Choose the main organism for genome alignment (e.g "Rat_6.0.97"). {NOTE: This ID is a label specific for this script and is made for the user to identify which genome version was used. It can contain any text}.
-ORGANISM_GENOME_ID="Rat_6.0.97" 
+ORGANISM_GENOME_ID="hg38" 
 # PATH/Directory in which the genome files are located
-GENOME_FILES_DIR="/data/GENOME/"
+GENOME_FILES_DIR="/genome/"
 # Filename of genome fasta file (without path)
-GENOME_FILE_NAME="Rattus_norvegicus.Rnor_6.0.dna.toplevel.fa"
+GENOME_FILE_NAME="Homo_sapiens_assembly38.fasta"
 # Filename of GTF file (without path)
-GTF_FILE_NAME="Rattus_norvegicus.Rnor_6.0.97.gtf"
+GTF_FILE_NAME="hg38.ensGene.gtf"
 # Whether the genome indexing has already been done. When "Yes" is specified, the indexing will be skipped. If "No" The index will be made
 GENOME_INDEX_ALREADY_AVAILABLE="Yes" #Specify "Yes" or "No"
-RSEM_INDEX_ALREADY_AVAILABLE="Yes" #Specify "Yes" or "No"
+RSEM_INDEX_ALREADY_AVAILABLE="No" #Specify "Yes" or "No"
 #Specify whether you are working with a large (=human) genome. Specify "Yes" when working with human or "No"
-LARGE_GENOME="No"
+LARGE_GENOME="Yes"
 #
 # System parameters
 #Specify amount of CPUs to use for alignment step (advised=20 or 30)
-CPU_FOR_ALIGNMENT=20 
+CPU_FOR_ALIGNMENT=35 
 #Specify amount of CPUs to use (advised: 6 or higher)
-CPU_FOR_OTHER=6 
+CPU_FOR_OTHER=35
 
 ### No other input required ###
 
@@ -53,7 +53,7 @@ CPU_FOR_OTHER=6
 declare BASEDIR=${OUTPUT_DIR}   #specify working directory
 #declare SEQMODE="single"   #specify "paired" or "single" end mode
 #declare RAW_SAMPLE_DIR=${BASEDIR}   #specify location of fastq files
-declare SUFFIX_IN=${SUFFIX_INPUTFILES} # specify extension of input files (".fastq" or ".fastq.gz")
+declare SUFFIX_IN=${SUFFIX_INPUTFILES} # specify extension of input files (".fastq", ".fastq.gz", etc.)
 
 #For paired end mode: specify the SUFFIXES used for read1 and read2 
 declare PAIR1=${PAIRED_END_SUFFIX_FORWARD}
@@ -83,9 +83,9 @@ declare TRIMM_DIR="${BASEDIR}/Trimmed_reads/"
 declare OUTPUTDIR=${TRIMM_DIR}
 declare QC_DIR_fastp="${OUTPUTDIR}/fastpQCoutput/"
 declare QC_DIR_multiQC="${OUTPUTDIR}/MultiQC/"
-declare align_DIR="${OUTPUTDIR}STAR"
-declare Quant_DIR="${OUTPUTDIR}RSEM/"
-declare RSEM_GENOMEDIR="${GENOMEDIR}RSEM/"
+declare align_DIR="${OUTPUTDIR}/STAR/"
+declare Quant_DIR="${OUTPUTDIR}/RSEM/"
+declare RSEM_GENOMEDIR="${GENOMEDIR}/RSEM/"
 
 declare SUFFIX1=${SUFFIX_IN} 
 declare SUFFIX_out="_trimmed${SUFFIX_IN}"
@@ -162,7 +162,8 @@ for FILENAME in ${FILES1[@]}; do
 	--cut_right \
 	--cut_right_window_size 4 \
 	--cut_right_mean_quality 15 \
-	--length_required 36 
+	--length_required 36
+	fi
 done; fi
 conda deactivate
 
@@ -220,21 +221,24 @@ for FILENAME in ${FILES1[@]}; do
 		echo "File exists, continuing"
 	else
 		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-${#PAIR1}}]" 
-		if [ ${SUFFIX1} == ".fastq.gz" ]; then
-		STAR \
-		--runThreadN ${CPUs_align} \
-		--genomeDir ${GENOMEDIR} \
-		--readFilesIn "${READ1}.fastq" \
-		--quantMode TranscriptomeSAM \
-		--readFilesCommand zcat \
-		--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
+		if [ ${SUFFIX1} == *".gz"$ ]; then
+			echo "gzipped file detected, using zcat to read"
+			STAR \
+			--runThreadN ${CPUs_align} \
+			--genomeDir ${GENOMEDIR} \
+			--readFilesIn "${READ1}.${SUFFIX1}" \
+			--quantMode TranscriptomeSAM \
+			--readFilesCommand zcat \
+			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
+		else
+			echo "uncompressed FASTQ format detected"
+			STAR \
+			--runThreadN ${CPUs_align} \
+			--genomeDir ${GENOMEDIR} \
+			--readFilesIn "${READ1}.${SUFFIX1}" \
+			--quantMode TranscriptomeSAM \
+			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
 		fi
-		STAR \
-		--runThreadN ${CPUs_align} \
-		--genomeDir ${GENOMEDIR} \
-		--readFilesIn "${READ1}.fastq" \
-		--quantMode TranscriptomeSAM \
-		--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
 	fi
 done;fi
 
@@ -247,22 +251,26 @@ for FILENAME in ${FILES1[@]}; do
 	#Prevent overwrite: 
 	if [ -e ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}Log.final.out  ]; then
 		echo "File exists, continuing"
-	echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}]" 
-	if [ ${SUFFIX1} == ".fastq.gz" ]; then
-	STAR \
-	--runThreadN ${CPUs_align} \
-	--genomeDir ${GENOMEDIR} \
-	--readFilesIn "${READ1}${SUFFIX1}" "${READ2}${SUFFIX1}" \
-	--quantMode TranscriptomeSAM \
-	--readFilesCommand zcat \
-	--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
+		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}]" 
+		if [ ${SUFFIX1} == *".gz"$ ]; then
+			echo "gzipped file detected, using zcat to read"
+			STAR \
+			--runThreadN ${CPUs_align} \
+			--genomeDir ${GENOMEDIR} \
+			--readFilesIn "${READ1}${SUFFIX1}" "${READ2}${SUFFIX1}" \
+			--quantMode TranscriptomeSAM \
+			--readFilesCommand zcat \
+			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
+		else
+			echo "uncompressed FASTQ format detected"
+			STAR \
+			--runThreadN ${CPUs_align} \
+			--genomeDir ${GENOMEDIR} \
+			--readFilesIn "${READ1}.${SUFFIX1}" "${READ2}.${SUFFIX1}" \
+			--quantMode TranscriptomeSAM \
+			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
+		fi
 	fi
- 	STAR \
-	--runThreadN ${CPUs_align} \
-	--genomeDir ${GENOMEDIR} \
-	--readFilesIn "${READ1}.fastq" "${READ2}.fastq" \
-	--quantMode TranscriptomeSAM \
-	--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
 done;fi
 conda deactivate
 
@@ -309,9 +317,13 @@ for FILENAME in ${FILES1[@]}; do
 done;fi
 
 # Output summary file from RSEM results
-declare FILELIST=$(find ./*genes.results  -printf "%f\t")
-rsem-generate-data-matrix $FILELIST > sampleData.tsv
-sed -i 's/\.genes.results//g' sampleData.tsv
+declare FILELIST=$(find ${Quant_DIR} -name "*genes.results"  -printf "%f\t")
+rsem-generate-data-matrix $FILELIST > ${Quant_DIR}/genes.data.tsv
+sed -i 's/\.genes.results//g' ${Quant_DIR}/genes.data.tsv
+
+declare FILELIST=$(find ${Quant_DIR} -name "*isoforms.results"  -printf "%f\t")
+rsem-generate-data-matrix $FILELIST > ${Quant_DIR}/isoforms.data.tsv
+sed -i 's/\.genes.results//g' ${Quant_DIR}/isoforms.data.tsv
 
 conda deactivate
 
@@ -322,7 +334,7 @@ conda deactivate
 source activate multiqc
 # Running multiQC on fastp-output
 # multiqc ${QC_DIR_fastp} --filename MultiQC_Report.html --outdir ${QC_DIR_multiQC}
-multiqc ${BASEDIR} --filename MultiQC_Report.html --outdir ${QC_DIR_multiQC}
+multiqc --cl_config "extra_fn_clean_exts: { '_fastp.json' }" ${BASEDIR} --filename MultiQC_Report.html --outdir ${QC_DIR_multiQC}
 conda deactivate
 
 #Rezip unzipped files
