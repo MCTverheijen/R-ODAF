@@ -1,0 +1,1355 @@
+---
+title: "Transcriptome Profiling of Rat Liver exposed to Hexabromocyclododecane (HBCD)"
+author: "Matthew J. Meier"
+subtitle: "RNASeq Analysis: Report for TRF case study"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    theme: spacelab # flatly spacelab sandstone cerulean
+knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(dirname(inputFile), paste0("RNASeq_analysis_",format(Sys.time(), '%d-%m-%Y.%H.%M'),".html"))) })
+---
+
+***
+
+# Revision History
+
+**This version**  
+  
+*Current version: 1*  
+Date report generated: `r format(Sys.time(), '%d %B, %Y')`  
+Report prepared for: TRF Group  
+Purpose of report:
+
+* Excercise to analyze RNASeq data
+
+**Previous revisions**  
+
+N/A
+
+
+***
+
+# Code setup, Data Loading, and DESeq2 Code
+
+This report is meant to help explore DESeq2 results and was generated using RMarkdown. This section contains the code for setting up the rest of the report.
+
+## Load libraries
+
+```{r docSetup, warning=FALSE, message=FALSE}
+## knitrBoostrap and device chunk options
+library('knitr')
+# Set so that long lines in R will be wrapped:
+opts_chunk$set(bootstrap.show.code = FALSE, bootstrap.panel = TRUE, cache = TRUE) # tidy.opts=list(width.cutoff=60), tidy=TRUE, crop = NULL
+# Set this variable to FALSE if you only want to run the plotting functions by reloading the last RData file.
+flag=TRUE
+# Set this variable to TRUE if you would like to embed the files directly into the HTML for portability. This slows down page responsiveness drastically, since the files are generally quite large.
+embedFiles=FALSE
+# Se this variable to be TRUE if you want to have separate plots of top genes as defined in the R-ODAF template
+R_ODAF_plots=FALSE 
+```
+
+```{r 'warn_user', eval=!flag}
+message("WARNING WARNING WARNING!!! This report was produced to TEST PLOTTING FUNCTIONS ONLY and should be used exclusively for testing and development.")
+```
+
+```{r setup, warning=FALSE, message=FALSE}
+#### Load Libraries
+
+## Record start time
+startTime <- Sys.time()
+
+## Set libPaths
+.libPaths(c("/home/mpiage/R/x86_64-pc-linux-gnu-library/3.6",.libPaths()))
+
+## Bioconductor
+library('DESeq2')
+library('edgeR')
+library('org.Mm.eg.db')
+library('enrichplot')
+library('rWikiPathways')
+
+## CRAN
+library('ggplot2')                                 
+theme_set(theme_bw())
+library('knitr')
+library('RColorBrewer')
+library('viridis')
+library('pheatmap')
+library('DT')
+library('sessioninfo')
+library('plotly')
+
+## Other packages
+packages <- c("RMariaDB",
+              "clusterProfiler",
+              "biomaRt",
+              "regionReport",
+              "magrittr",
+              "vsn",
+              "lattice",
+              "pheatmap",
+              "dplyr",
+              "data.table",
+              "forcats",
+              "tidytext",
+              "openxlsx",
+              "kableExtra"
+              )
+
+invisible(suppressPackageStartupMessages(lapply(packages, function(x)require(x, character.only = T, quietly = T))))
+options(java.parameters = "-Xmx10000m")
+```
+
+## Specify parameters
+
+```{r setup_code, warning=FALSE, message=FALSE, collapse=TRUE}
+###################################################################################
+###################################################################################
+# PARAMETERS TO SET MANUALLY                            		 
+
+# Set file locations				
+	sampledir <- "/home/mpiage/data/2020_TRF_Reza_flame_retardants/"
+  setwd(sampledir)
+	outputdir <- paste(sampledir, "./DEG_output/", sep="")
+	if(!dir.exists(outputdir)) {dir.create(outputdir)}
+# Names of files to load
+	SampleDataFile <- "genes.data.tsv" #This tab delimited file contains the merged RSEM.genes.results files
+	SampleKeyFile <- "metadata.txt" #This tab delimited file contains at least 2 columns: NAME (sample names identical to the column names of sampleData) and Compound (needs to identify to which group the sample belongs -> ExperimentalGroup & ControlGroup)
+	ContrastsFile <- "contrasts.txt" #This tab delimited file contains one row per contrast, with the control for comparison in the right column and the comparison in the left column
+# Specify which groups need to be compared 
+	contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="", header=FALSE,  quote="\"")
+	short_contrast_names <- contrasts # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
+	intgroup <- DESIGN <- "group"	#Column name which defines the groups to be compared
+  nBestFeatures <- 20 # The number of best features to make plots of their counts
+  nBest <- 100 # Number of features to include in table and limiting PCA/clustering analysis
+  nHeatmap <- 50 # Number of genes for heatmap
+# Set analysis ID. This ID will be used as prefix for the output files
+	analysisID <-"2020_TRF"
+# Specify used platform/technology for data generation:
+	Platform <- "RNA-Seq" # Specify "RNA-Seq" or "TempO-seq"
+
+# Misc parameters
+	digits = 2 # For rounding numbers
+```
+
+The code above (not shown by default) specifies user preferences and data locations.
+
+## Load data
+
+```{r 'load_data', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
+# Load input files 
+setwd(sampledir)
+sampleData <- read.delim(SampleDataFile,
+                         sep="\t",
+                         stringsAsFactors=FALSE,
+                         header=TRUE, 
+                         quote="\"",
+                         row.names=1,
+                         check.names=FALSE)
+DESeqDesign <- read.delim(SampleKeyFile,
+                          stringsAsFactors=FALSE,
+                          sep="\t",
+                          header=TRUE,
+                          quote="\"",
+                          row.names="accession")
+
+NORM_TYPE<-paste0(analysisID, "_DESeq2_", Platform)
+
+plotdir <- paste(outputdir, "/plots/", sep="")
+if(!dir.exists(plotdir)) {dir.create(plotdir)}
+barplot.dir<- paste(plotdir, "/barplot_genes/", sep="")
+if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
+
+# First data clean-up: replace NA & remove samples with total readcount < threshold
+sampleData[ is.na(sampleData) ] <- 0 
+sampleData <- sampleData[,(colSums(sampleData)>1000000)] # 1 million reads required per sample
+# Some extra cleanup
+colnames(sampleData) <- gsub(pattern="^0", replacement="", x=colnames(sampleData))
+```
+
+The code above (not shown by default) loads user-provided sample data and meta data.
+
+## Run DESeq2
+
+```{r run-DESeq2, collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
+##########
+# DESeq2 #
+##########
+print(NORM_TYPE) # Name of experiment
+
+all(rownames(DESeqDesign) %in% colnames(sampleData)) # Sanity check: each sample name (row) in the metadata should have a corresponding column in the count data
+DESeqDesign <- DESeqDesign[(colnames(sampleData)),] # Reorder the metadata table to correspond to the order of columns in the count data
+head(rownames(DESeqDesign))
+head(colnames(sampleData)) # Output should match
+
+setwd(outputdir)
+if (file.exists("dds.Rdata")) {
+  print(paste("Already found DESeq2 object from previous run; loading from disk."))
+  load("./dds.Rdata")
+  if (!identical(as.data.frame(round(counts(dds))),
+                 round(sampleData),0)) {
+    next
+    }
+  } else {
+  dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
+                                colData = as.data.frame(DESeqDesign),
+                                design = ~group )
+  dds <- dds[, rownames(DESeqDesign)]
+  dds <- DESeq(dds)
+  save(dds, file="./dds.Rdata")
+  }
+
+#DESeqResults <- results(dds)
+#resOrdered <- DESeqResults[order(DESeqResults$pvalue),]
+#summary(resOrdered)
+
+# Another sanity check to make sure the object looks correct
+resultsNames(dds)
+head(colData(dds))
+head(assay(dds))
+head(rowRanges(dds))
+str(counts(dds))
+
+#Set parameters according to platform
+if (Platform=="RNA-Seq"){
+  MinCount<- 1
+  alpha <- pAdjValue <- 0.05 # Relaxed from 0.01
+  linear_fc_filter = 1.5
+} else if (Platform=="TempO-seq") {
+  MinCount<- 0.5
+  pAdjValue<- 0.05 
+} else { print("Platform/technology not recognized") }
+
+
+# Make regularized log object for later plotting
+rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
+
+```
+
+The code above (not shown by default) runs DESeq2.
+
+## Sample data (metadata about your experiment) 
+
+```{r print_metadata}
+knitr::kable(DESeqDesign,
+             row.names =  F,
+             caption="User-provided information about samples and experimental conditions") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+## Run R-ODAF Code
+
+```{r 'define-ODAF-functions', collapse=TRUE, warning=FALSE, message=FALSE}
+###################################################################################
+#DEFINE FUNCTIONS
+###################################################################################
+plot.barplots<-function(samples,b) {
+  color <- NULL
+  for (h in 1:ncol(norm_data)){
+    if (substring(colnames(norm_data)[h], 1, 3) == substring(condition2, 1, 3)) { color <- c(color, "red3") } else { color <- c(color, "darkgrey")}
+  }
+  fileNamePlot <- paste0(b, row.names(samples)[b], ".png")
+  pseudoTitle <- paste0(row.names(samples)[b], "_pAdj:", samples[b,"padj"])
+  
+  png(file=paste(fileNamePlot, sep="/"), width=1200, height=700, pointsize=20)
+  par(mar=c(8,4,3,1))
+  barplot(as.numeric(norm_data[row.names(samples)[b],]), las=2, col=color, main=pseudoTitle, cex.names=0.5,  cex.axis=0.8, names.arg=colnames(norm_data)) 
+  dev.off()
+} #plot.barplots function done
+
+###################################################################################
+draw.barplots<-function(samples, top_bottom, NUM){
+  if (nrow(samples) == 0) {
+    #print("no genes to plot") 
+  } else { 
+    if (top_bottom == "top") {
+      #print(paste0("drawing Top ", NUM, " plots"))
+      if (nrow(samples) <= NUM) { 
+        for (b in 1:nrow(samples)) {plot.barplots(samples,b)}
+      }
+      
+      if (nrow(samples) > NUM) { 
+        for (b in 1:NUM) {plot.barplots(samples,b)}	
+      }	
+    }
+    
+    if (top_bottom == "bottom") {
+      #print(paste0("drawing Bottom", NUM, " plots"))
+      if (nrow(samples) <= NUM) { 
+        for (b in 1:nrow(samples)) {plot.barplots(samples,b)}
+      }
+      if (nrow(samples) > NUM) { 
+        for (b in ((nrow(samples)-NUM+1):nrow(samples))) {plot.barplots(DEsamples,b)}
+      }
+    }}
+} #draw.barplots function done
+
+###################################################################################
+###################################################################################
+```
+
+The code above (not shown by default) loads in plotting functions specific to the R-ODAF template.
+
+```{r 'run_ODAF_code', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
+
+resList <- list()
+for (x in 1:nrow(contrasts)) {	## for all comparisons to be done	
+	
+  condition1 <- contrasts[x,2]
+	condition2 <- contrasts[x,1]
+	print(paste(condition2, " vs ", condition1, ":", NORM_TYPE))
+	
+	DE_Design <- matrix(data=NA, ncol=2)
+	DE_Design <- DESeqDesign [c(grep(condition1,DESeqDesign[,DESIGN]), grep(condition2,DESeqDesign[,DESIGN])),]
+	samples <- sampleData[, rownames(DE_Design) ]
+	colnames(samples)<-NULL
+	
+	###########
+
+	print(paste0("Filtering genes: 75% of at least 1 group need to be above ", MinCount, " CPM"))
+	print("AND")
+	print("Detecting spurious spikes: Max-Median > Sum/(Rep+1)" )
+		SampPerGroup<-table(DE_Design[,DESIGN])
+		idx<-FlagSpike<-NameRows<-NULL
+		Counts<-counts(dds, normalized=TRUE)
+		CPMdds<-cpm(counts(dds, normalized=TRUE))
+		for (gene in 1:nrow(dds)) {
+			GroupsPass<-checkSpike<-NULL
+			for (group in 1:length(SampPerGroup)) { #test if group passes
+				sampleCols<-grep(dimnames(SampPerGroup)[[1]][group],DE_Design[,DESIGN])
+				Check<-sum(CPMdds[gene,sampleCols] >= MinCount)>= 0.75*SampPerGroup[group]
+				GroupsPass<-c(GroupsPass, Check)
+				if (Check == FALSE) {checkSpike<- c(checkSpike, Check)} else {
+					checkSpike<-c(checkSpike, ((max(Counts[gene,sampleCols])-median(Counts[gene,sampleCols])) >=
+					                             (sum(Counts[gene,sampleCols])/(SampPerGroup[group]+1))))
+				}
+			}
+			idx <- c(idx, as.logical(sum(GroupsPass)))
+			if (sum(checkSpike) >=1) {
+				FlagSpike<-rbind(FlagSpike, Counts[gene,])
+				NameRows<<-c(NameRows, row.names(Counts)[gene])
+				row.names(FlagSpike)<-NameRows 
+			}
+		}
+
+	print("Obtaining the DESeq2 results")
+	currentContrast <- c(DESIGN, condition2, condition1)
+	res <- results(dds[idx],
+	               contrast=currentContrast,
+	               pAdjustMethod= 'fdr',
+	               cooksCutoff=FALSE) # Cooks cutoff disabled - manually inspect.
+	res <- lfcShrink(dds=dds[idx],
+	                 contrast=currentContrast,
+	                 res=res,
+	                 type="ashr")
+	#Make new directory for the ODAF-specific files
+	ODAFdir <- paste(outputdir, "/R-ODAF/", sep="")
+	if(!dir.exists(ODAFdir)) {dir.create(ODAFdir)}
+	setwd(ODAFdir)
+	FileName<-paste(NORM_TYPE, condition2,"vs",condition1, "FDR", pAdjValue, sep="_")		
+	#Save output tables		
+	norm_data <<- counts(dds[idx],normalized=TRUE)
+	colnames(norm_data) <- colData(dds)[,DESIGN]
+	write.table(norm_data,file=paste0(FileName, "_Norm_Data.txt"), sep="\t", quote=FALSE)
+	write.table(FlagSpike,file=paste0(FileName, "_FlaggedSpikes.txt"), sep="\t", quote=FALSE)
+	DEsamples <<- subset(res,res$padj < pAdjValue)	
+	write.table(DEsamples,file=paste0(FileName,"_DEG_table.txt"), sep="\t", quote=FALSE)
+	DEspikes<<- DEsamples[rownames(DEsamples)%in%NameRows,]	
+	write.table(DEspikes,file=paste0(FileName,"_DEspikes_table.txt"), sep="\t",quote=FALSE)
+
+	resList[[x]] <- res
+	
+	if (R_ODAF_plots==TRUE) {
+  	print("creating Read count Plots")
+  	# top DEGs
+  	plotdir<- paste(outputdir, "/plots/", sep="")
+  	if(!dir.exists(plotdir)) {dir.create(plotdir)}
+  	barplot.dir<- paste(plotdir, "/barplot_genes/", sep="")
+  	if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
+  
+  	TOPbarplot.dir<- paste(barplot.dir, "Top_DEGs/", sep="")
+  	if(!dir.exists(TOPbarplot.dir)) {dir.create(TOPbarplot.dir)}
+  	setwd(TOPbarplot.dir)
+  	draw.barplots(DEsamples, "top", 20) #(DEsamples, top_bottom, NUM)
+  	print("Top 20 DEG plots done")
+  
+  	# Spurious spikes
+  	SPIKEbarplot.dir<- paste(barplot.dir, "DE_Spurious_spikes/", sep="")
+  	if(!dir.exists(SPIKEbarplot.dir)) {dir.create(SPIKEbarplot.dir)}
+  	setwd(SPIKEbarplot.dir)
+  	draw.barplots(DEspikes, "top", nrow(DEspikes)) #(DEsamples, top_bottom, NUM)
+  	print("All DE_Spurious_spike plots done")
+	}
+}
+```
+
+The code above (not shown by default) runs the R-ODAF spurious spike detection and outputs the DESeq Results objects as a list for each contrast.
+
+## Create summary tables
+
+```{r create_tables, collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
+#listEnsembl()
+#listMarts()
+ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+#listAttributes(ensembl)
+#listFilters(ensembl)
+
+genes <- row.names(resList[[1]])
+#genes_all <- unique(row.names(assay(dds)))
+setwd(outputdir)
+if (file.exists("id_table.Rdata")) {
+  print(paste("Already found ID table; skipping biomaRt query and loading from disk."))
+  load("./id_table.Rdata")
+  mgi_id_table <- mgi_id_table_entrez[,1:3]
+  } else {
+  mgi_id_table_entrez <- getBM(filters="ensembl_gene_id",
+                        attributes= c("ensembl_gene_id",
+                                      "mgi_symbol",
+                                      "mgi_description",
+                                      "entrezgene_id"), # "refseq_mrna" or "refseq_peptide" may be of interest, but can't join with gene tables.
+                        values=genes,
+                        mart=ensembl)
+  save(mgi_id_table_entrez, file="./id_table.Rdata")
+  mgi_id_table <- mgi_id_table_entrez[,1:3]
+}
+
+sigtabList <- list()
+alltablList <- list()
+for (i in 1:length(resList)) {
+  print(i)
+  sigTab <- resList[[i]]
+  # Add taxonomy
+  if (nrow(sigTab) == 0) {
+    next
+  } else {
+    sigTab <- cbind(ensembl_gene_id=row.names(resList[[i]]),
+                    as(sigTab, "data.frame"),
+                    contrast = gsub(pattern = "log2.*Time\ ",
+                                    replacement =  "",
+                                    x = resList[[i]]@elementMetadata[[2]][2]))
+    sigTab <- dplyr::left_join(sigTab,
+                               mgi_id_table,
+                               by="ensembl_gene_id")
+    sigTab <- dplyr::mutate(sigTab, linearFoldChange=ifelse(log2FoldChange > 0,
+                                                            2 ^ log2FoldChange,
+                                                            -1 / (2 ^ log2FoldChange)))
+    #sigTab <- sigTab[,c(1,9,10,2,3,11,5:8)] # Reorder columns
+    sigTab <- sigTab[,c(1,8,9,2,3,10,4:7)] 
+    alltablList[[i]] <- sigTab
+    sigTab <- sigTab[!is.na(sigTab$padj) & sigTab$padj < alpha & abs(sigTab$linearFoldChange) > linear_fc_filter, ] ## FILTERS!
+    sigtabList[[i]] <- sigTab
+  }
+}
+# Write dataframe of all results
+sigtabList <- sigtabList[!sapply(sigtabList, is.null)]
+significantResults <- do.call(rbind, sigtabList)
+allResults <- do.call(rbind, alltablList)
+
+# All Results for Plotting
+# Replace NA gene symbols with ensembl ID
+allResults$mgi_symbol[is.na(allResults$mgi_symbol)] <- allResults$ensembl_gene_id[is.na(allResults$mgi_symbol)] 
+# Replace blan gene symbols with ensembl ID
+allResults$mgi_symbol[allResults$mgi_symbol == ""]  <- allResults$ensembl_gene_id[allResults$mgi_symbol == ""]  
+allResults$padj[allResults$padj == 0] <- 10^-100 # For plotting purposes!
+allResultsOrdered_logFC_filter <- dplyr::filter(allResults, abs(linearFoldChange) > 1.5) %>%
+  arrange(-abs(linearFoldChange))
+allResultsOrdered_logFC_filter <- dplyr::filter(allResultsOrdered_logFC_filter, padj < alpha)
+res.df <- allResultsOrdered_logFC_filter
+
+degTable <- significantResults %>% 
+  dplyr::group_by(contrast) %>%
+  dplyr::count()
+
+summaryTable <- data.frame( ensembl_gene_id=row.names(resList[[1]]),
+                            baseMean=resList[[1]]$baseMean )
+contrastsInSummary <- vector()
+for (i in 1:length(resList)) {
+  print(i)
+  n <- resList[[i]]@elementMetadata[[2]][2]
+  n <- gsub(pattern = paste0("log2\ fold\ change\ \\(MLE\\):\ ",DESIGN),
+            replacement =  paste0("log2 Fold Change"),
+            x = resList[[i]]@elementMetadata[[2]][2])
+  p <- gsub(pattern = paste0("log2\ fold\ change\ \\(MLE\\):\ ",DESIGN),
+           replacement =  resList[[i]]@elementMetadata[[2]][6],
+           x = resList[[i]]@elementMetadata[[2]][2])
+  q <- gsub(pattern = paste0("log2\ fold\ change\ \\(MLE\\):\ ",DESIGN,"\ "),
+            replacement =  "",
+            x = resList[[i]]@elementMetadata[[2]][2])
+  message(n)
+  message(p)
+  message(q)
+  summaryTable <- cbind(summaryTable,
+                        log2FoldChange=resList[[i]]$log2FoldChange,
+                        linearFoldChange=ifelse(resList[[i]]$log2FoldChange > 0,
+                                                2 ^ resList[[i]]$log2FoldChange,
+                                                -1 / (2 ^ resList[[i]]$log2FoldChange)),
+                        padj=resList[[i]]$padj)
+  names(summaryTable)[[ncol(summaryTable)-2]] <- paste0("log2FoldChange_",i)
+  names(summaryTable)[[ncol(summaryTable)-1]] <- paste0("linearFoldChange_",i)
+  names(summaryTable)[[ncol(summaryTable)]] <- paste0("FDR_",i)
+  contrastsInSummary[i] <- q
+  print(summary(resList[[i]], pAdjValue))
+}
+maxFCs <- allResults %>%
+  dplyr::group_by(ensembl_gene_id) %>%
+  dplyr::filter(abs(linearFoldChange) == max(abs(linearFoldChange))) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(ensembl_gene_id, linearFoldChange)
+
+minPvals <- allResults %>%
+  group_by(ensembl_gene_id) %>%
+  dplyr::filter(padj == min(padj)) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(ensembl_gene_id, padj)
+
+summaryTable <- summaryTable %>%
+  left_join(mgi_id_table, by="ensembl_gene_id") %>%
+  left_join(maxFCs, by="ensembl_gene_id") %>%
+  left_join(minPvals, by="ensembl_gene_id") %>%
+  rename(maxFoldChange = linearFoldChange,
+         minFDR_pval = padj
+         ) %>%
+  mutate(maxFoldChange=abs(maxFoldChange))
+
+numColsToPrepend <- ncol(summaryTable) - 3*length(resList) - 2 # Number of columns per contrast = 3. Subtract two for the baseMean and ensembl_gene_id columns.
+colPositionsToPrependSTART <- ncol(summaryTable) - numColsToPrepend + 1
+colPositionsOfData <- ncol(summaryTable) - numColsToPrepend
+summaryTable <- summaryTable[,c(1,
+                                colPositionsToPrependSTART:ncol(summaryTable),
+                                2:colPositionsOfData)]
+
+CPMddsDF <- data.frame(ensembl_gene_id = row.names(CPMdds), CPMdds, check.names=F)
+CPMddsDF <- dplyr::left_join(CPMddsDF, mgi_id_table, by="ensembl_gene_id")
+numColsToPrepend <- ncol(CPMddsDF) - ncol(CPMdds) - 1
+colPositionsToPrependSTART <- ncol(CPMddsDF) - numColsToPrepend + 1
+colPositionsOfData <- ncol(CPMddsDF) - numColsToPrepend
+CPMddsDF <- CPMddsDF[,c(1,colPositionsToPrependSTART:ncol(CPMddsDF),2:colPositionsOfData)]
+```
+
+The code above (not shown by default) generates data frames summarzing the differentially expressed genes (DEGs).  
+
+Here is the number of DEGs in each group:
+
+```{r 'display_DEG_summary'}
+kable(degTable,
+      caption="Number of differentially expressed genes across each contrast") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+```{r 'write-tables', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
+#######################################
+### Write results table from DESeq2
+#######################################
+setwd(outputdir)
+write.table(allResults,         file=paste0(NORM_TYPE,"-DESeq_output_ALL.txt"),               quote=F, sep='\t', col.names=NA)
+write.table(significantResults, file=paste0(NORM_TYPE,"-DESeq_output_significant.txt"),       quote=F, sep='\t', col.names=NA)
+write.table(summaryTable,       file=paste0(NORM_TYPE,"-DESeq_output_all_genes.txt"),         quote=F, sep='\t', col.names=NA)
+write.table(CPMddsDF,           file=paste0(NORM_TYPE,"-Per_sample_CPM.txt"),                 quote=F, sep='\t', col.names=NA)
+write.table(Counts,             file=paste0(NORM_TYPE,"-Per_sample_normalized_counts.txt"),   quote=F, sep='\t', col.names=NA)
+```
+
+The code above (not shown by default) writes text files for each DEG summary type.
+
+# Write data
+
+```{r 'write-excel-worksheets', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
+setwd(outputdir)
+#######################################
+### Write results above but in Excel
+#######################################
+### Global options
+options("openxlsx.borderColour" = "#4F80BD")
+options("openxlsx.borderStyle" = "thin")
+options("openxlsx.maxWidth" = 50)
+hs1 <- createStyle(textDecoration = "Bold",
+                   border = "Bottom",
+                   fontColour = "black")
+hs2 <- createStyle(textDecoration = "Bold",
+                   border = c("top", "bottom", "left", "right"),
+                   fontColour = "black",
+                   fgFill="#C5D9F1")
+
+### Summary results - one gene per line, columns are contrasts
+wb1 <- createWorkbook()
+modifyBaseFont(wb1, fontSize = 10, fontName = "Arial Narrow")
+addWorksheet(wb1, "DESeq_results_per_gene")
+for (j in 1:length(contrastsInSummary)) {
+  myStartcol=7+((j-1)*3)
+  myEndcol=9+((j-1)*3)
+  mergeCells(wb1,
+             sheet = 1,
+             cols = myStartcol:myEndcol,
+             rows = 1)
+  writeData(
+    wb1,
+    sheet = 1,
+    x = contrastsInSummary[j],
+    startCol = myStartcol,
+    startRow = 1)
+}
+conditionalFormatting(wb1,
+                      sheet = 1,
+                      rows = 1,
+                      cols = 1:ncol(summaryTable),
+                      type = "contains",
+                      rule = "",
+                      style=hs2)
+freezePane(wb1, sheet = 1, firstActiveRow = 3, firstActiveCol = 4)
+writeDataTable(wb1,
+               sheet = 1,
+               startRow = 2,
+               x = summaryTable,
+               colNames = TRUE,
+               rowNames = F,
+               tableStyle = "none",
+               headerStyle = hs1,
+               keepNA = T,
+               na.string = "NA")
+setColWidths(wb1, sheet = 1, cols = 1:6, widths = "auto") # This is hard-coded, so prone to error; will only impact auto adjustment of col widths.
+setColWidths(wb1, sheet = 1, cols = 7:ncol(summaryTable), widths = 13) # This is hard-coded, so prone to error; will only impact auto adjustment of col widths.
+fname1 <- paste0("1.",NORM_TYPE,"-DESeq_by_gene.xlsx")
+saveWorkbook(wb1, fname1, overwrite = TRUE)
+
+### All results in one table
+wb2 <- createWorkbook()
+modifyBaseFont(wb2, fontSize = 10, fontName = "Arial Narrow")
+addWorksheet(wb2, paste0("FDR",pAdjValue,".Linear.FC.",linear_fc_filter))
+freezePane(wb2, sheet = 1, firstRow = TRUE, firstActiveCol = 4)
+writeDataTable(wb2,
+               sheet = 1,
+               x = significantResults,
+               colNames = TRUE,
+               rowNames = F,
+               tableStyle = "none",
+               headerStyle = hs1,
+               keepNA = T,
+               na.string = "NA")
+setColWidths(wb2, sheet = 1, cols = 1:ncol(significantResults), widths = "auto")
+addWorksheet(wb2, "DESeq_all_results")
+freezePane(wb2, sheet = 2, firstRow = TRUE, firstActiveCol = 4)
+writeDataTable(wb2,
+               sheet = 2,
+               x = allResults,
+               colNames = TRUE,
+               rowNames = F,
+               tableStyle = "none",
+               headerStyle = hs1,
+               keepNA = T,
+               na.string = "NA")
+setColWidths(wb2, sheet = 2, cols = 1:ncol(allResults), widths = "auto")
+saveWorkbook(wb2, paste0("2.",NORM_TYPE,"-DESeq_all.xlsx"), overwrite = TRUE)
+
+### All results with different tabs for each contrast
+wb3 <- createWorkbook()
+modifyBaseFont(wb3, fontSize = 10, fontName = "Arial Narrow")
+
+for (i in 1:length(levels(allResults$contrast))) {
+  print(i)
+  dataToWrite <- allResults[allResults$contrast==levels(allResults$contrast)[i],]
+  addWorksheet(wb3, short_contrast_names[i])
+  freezePane(wb3, sheet = i, firstRow = TRUE, firstActiveCol = 4)
+  writeDataTable(wb3,
+                 sheet = i,
+                 x = dataToWrite,
+                 colNames = TRUE,
+                 rowNames = F,
+                 tableStyle = "none",
+                 headerStyle = hs1,
+                 keepNA = T,
+                 na.string = "NA")
+  setColWidths(wb3, sheet = i, cols = 1:ncol(dataToWrite), widths = "auto")
+}
+saveWorkbook(wb3, paste0("3.",NORM_TYPE,"-DESeq_by_contrast.xlsx"), overwrite = TRUE)
+
+### CPM
+wb4 <- createWorkbook()
+modifyBaseFont(wb4, fontSize = 10, fontName = "Arial Narrow")
+addWorksheet(wb4, "Counts per million")
+freezePane(wb4, sheet = 1, firstRow = TRUE, firstActiveCol = 4)
+writeDataTable(wb4,
+               sheet = 1,
+               x = as.data.frame(CPMddsDF),
+               colNames = TRUE,
+               rowNames = F,
+               tableStyle = "none",
+               headerStyle = hs1,
+               keepNA = T,
+               na.string = "NA")
+setColWidths(wb4, sheet = 1, cols = 1:ncol(CPMddsDF), widths = "auto")
+saveWorkbook(wb4, paste0("4.",NORM_TYPE,"-CPM.xlsx"), overwrite = TRUE)
+```
+
+
+The code above (not shown by default) writes Excel workbooks and text files of DEG lists.
+
+These files should be provided to you as a separate zip file.
+
+```{r 'embed_excel_files', eval=embedFiles}
+setwd(outputdir)
+xfun::embed_files(list.files(".", "[.](xlsx)$"), name = "RNASeq_Spreadsheets.zip")
+```
+
+```{r 'embed_text_files', eval=embedFiles}
+setwd(outputdir)
+xfun::embed_files(list.files(".", "[.](txt)$"), name = "RNASeq_Text_Files.zip")
+```
+
+```{r 'embed_ODAF_files', eval=embedFiles}
+setwd(outputdir)
+xfun::embed_dir(ODAFdir, name = "RNASeq_R-ODAF_text_files.zip")
+```
+
+```{r 'save_point', show=FALSE, eval=flag}
+# Save RData here if flag is TRUE.
+setwd(outputdir)
+save.image(file = "Partial_analysis.RData")
+# Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
+# If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
+```
+
+# PCA Plots {.tabset}
+
+## All genes, before filtering
+
+```{r 'PCA'}
+## Perform PCA analysis and make plot
+plotPCA(rld, intgroup = intgroup, ntop=nrow(assay(rld)))
+
+## Get percent of variance explained
+data_pca <- plotPCA(rld, intgroup = intgroup, ntop=nrow(assay(rld)), returnData = TRUE)
+percentVar <- round(100 * attr(data_pca, "percentVar"))
+```
+
+The above plot shows the first two principal components that explain the variability in the data using the regularized log count data. If you are unfamiliar with principal component analysis, you might want to check the [Wikipedia entry](https://en.wikipedia.org/wiki/Principal_component_analysis) or this [interactive explanation](http://setosa.io/ev/principal-component-analysis/). In this case, the first and second principal component explain `r percentVar[1]` and `r percentVar[2]` percent of the variance respectively.
+
+## DEGs only
+
+```{r 'PCA_DEGs'}
+rld_degs <- rld[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
+## Perform PCA analysis and make plot
+plotPCA(rld_degs, intgroup = intgroup, ntop=nrow(rld_degs))
+
+## Get percent of variance explained
+data_pcaDEGs <- plotPCA(rld_degs, intgroup = intgroup, returnData = TRUE, ntop=nrow(rld_degs))
+percentVarDEGs <- round(100 * attr(data_pcaDEGs, "percentVar"))
+```
+
+The above plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarDEGs[1]` and `r percentVarDEGs[2]` percent of the variance respectively.
+
+## Top `r nBest` most variable genes only
+
+```{r 'PCA_top'}
+
+# Run this code only once for both the PCA and clustering analysis
+rv = rowVars(assay(rld))
+select = order(rv, decreasing = TRUE)[1:nBest]
+
+rld_top <- rld[select,]
+
+## Perform PCA analysis and make plot
+plotPCA(rld_top, intgroup = intgroup, ntop=nrow(rld_top))
+
+## Get percent of variance explained
+data_pcaTop <- plotPCA(rld_top, intgroup = intgroup, returnData = TRUE, ntop=nrow(rld_top))
+percentVarTop <- round(100 * attr(data_pcaTop, "percentVar"))
+```
+
+The above plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarTop[1]` and `r percentVarTop[2]` percent of the variance respectively.
+
+# Sample-to-sample distances {.tabset}
+
+## All genes, before filtering
+
+```{r 'sampleDist'}
+## Obtain the sample euclidean distances
+sampleDists <- dist(t(assay(rld)))
+sampleDistMatrix <- as.matrix(sampleDists)
+## Add names based on intgroup
+rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, intgroup]), 1,
+    paste, collapse = ' : ')
+colnames(sampleDistMatrix) <- NULL
+
+## Define colors to use for the heatmap
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+
+## Make the heatmap
+pheatmap(sampleDistMatrix, clustering_distance_rows = sampleDists,
+    clustering_distance_cols = sampleDists, color = colors)
+```
+
+This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
+
+## DEGs only
+
+```{r 'sampleDist_degs'}
+## Limit to the top n genes
+# rv = rowVars(assay(rld))
+# select = order(rv, decreasing = TRUE)[1:nBest]
+## Obtain the sample euclidean distances
+# sampleDistsTop <- dist(t(assay(rld)[select,]))
+sampleDistsDEGs <- dist(t(assay(rld_degs)))
+# sampleDistMatrixTop <- as.matrix(sampleDistsTop)
+sampleDistMatrixDEGs <- as.matrix(sampleDistsDEGs)
+
+## Add names based on intgroup
+rownames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, intgroup]), 1,
+    paste, collapse = ' : ')
+colnames(sampleDistMatrixDEGs) <- NULL
+
+## Define colors to use for the heatmap
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+
+## Make the heatmap
+pheatmap(sampleDistMatrixDEGs, clustering_distance_rows = sampleDistsDEGs,
+    clustering_distance_cols = sampleDistsDEGs, color = colors)
+```
+
+This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data of all DEGs. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
+
+## Most variable genes only
+
+```{r 'sampleDist_top'}
+## Limit to the top n genes
+## Using the select object from PCA code above...
+## Obtain the sample euclidean distances
+sampleDistsTop <- dist(t(assay(rld)[select,]))
+sampleDistMatrixTop <- as.matrix(sampleDistsTop)
+
+## Add names based on intgroup
+rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, intgroup]), 1,
+    paste, collapse = ' : ')
+colnames(sampleDistMatrixTop) <- NULL
+
+## Define colors to use for the heatmap
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+
+## Make the heatmap
+pheatmap(sampleDistMatrixTop, clustering_distance_rows = sampleDistsTop,
+    clustering_distance_cols = sampleDistsTop, color = colors)
+```
+
+This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data of the top `r nBest` most variable genes. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
+
+# Heatmaps {.tabset}
+
+## All DEGs
+
+```{r 'heatmap_all_DEGs', collapse=TRUE}
+
+mat <- assay(rld)[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
+mat <- mat - rowMeans(mat)
+
+# quantile_breaks <- function(xs, n = 10) {
+#   breaks <- quantile(xs, probs = seq(0, 1, length.out = n))
+#   breaks[!duplicated(breaks)]
+# }
+# 
+# mat_breaks <- quantile_breaks(mat, n = 11)
+# pheatmap(mat,
+#          annotation_col=heatmap_df,
+#          show_rownames = FALSE,
+#          border_color = NA,
+#          scale="row",
+#          breaks = mat_breaks)
+
+heatmap_df <- as.data.frame(colData(rld)[,c("Compound","Genotype","Timepoint")])
+pheatmap(mat,
+         annotation_col=heatmap_df,
+         show_rownames = FALSE,
+         border_color = NA,
+         scale="row")
+# color = inferno(10)
+
+```
+
+## Top `r nHeatmap` variable genes
+
+```{r 'heatmap_top_n_genes', fig.height=10, fig.width=10, collapse=TRUE}
+
+# sliderInput("nHeatmapShiny", label = "Bandwidth adjustment:",
+#              min = 10, max = 1000, value = 100, step = 10)
+
+# Interactive heatmap
+
+#renderPlot({
+rv = rowVars(assay(rld))
+select = order(rv, decreasing = TRUE)[1:nHeatmap]
+matRV <- assay(rld)[select,]
+matRV <- matRV - rowMeans(matRV)
+genes_for_heatmap <- row.names(matRV)
+genes_for_heatmap <- data.frame(ensembl_gene_id=row.names(matRV)) %>%
+  dplyr::left_join(mgi_id_table,
+                   by="ensembl_gene_id") %>%
+  dplyr::distinct()
+genes_for_heatmap$mgi_symbol[is.na(genes_for_heatmap$mgi_symbol)]  <- genes_for_heatmap$ensembl_gene_id[is.na(genes_for_heatmap$mgi_symbol)]  
+row.names(genes_for_heatmap) <- genes_for_heatmap$ensembl_gene_id
+pheatmap(matRV,
+         #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
+         annotation_col=heatmap_df,
+         labels_row=genes_for_heatmap[,2],
+         border_color = NA,
+         scale = "row",
+         cutree_rows = 3,
+         cutree_cols = 4)
+#})
+```
+
+
+# MA plots
+
+This section contains three MA plots (see [Wikipedia](https://en.wikipedia.org/wiki/MA_plot)) that compare the mean of the normalized counts against the log fold change. They show one point per feature. The points are shown in red if the feature has an adjusted p-value less than `alpha`, that is, the statistically significant features are shown in red.
+
+## Filtered at `r metadata(resList[[1]])$alpha` {.tabset}
+
+
+```{r 'MAplotalpha', results='asis'}
+## MA plot with alpha used in DESeq2::results()
+for (i in 1:length(resList)) {
+contrast = gsub(pattern = "log2.*Time\ ",
+                replacement =  "",
+                x = resList[[i]]@elementMetadata[[2]][2])
+cat("###", contrast, " \n")
+DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha, main = paste('MA plot with alpha =',
+    metadata(resList[[i]])$alpha,',',contrast))
+cat('\n\n')
+}
+
+```
+
+
+This first plot shows uses `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.
+
+
+## Filtered at `r metadata(resList[[1]])$alpha / 2` {.tabset}
+
+
+```{r 'MAplotalphaHalf', results='asis'}
+## MA plot with alpha = 1/2 of the alpha used in DESeq2::results()
+for (i in 1:length(resList)) {
+contrast = gsub(pattern = "log2.*Time\ ",
+                replacement =  "",
+                x = resList[[i]]@elementMetadata[[2]][2])
+cat("###", contrast, " \n")
+DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha / 2,
+    main = paste('MA plot with alpha =', metadata(resList[[i]])$alpha / 2,',',contrast))
+cat('\n\n')
+}
+
+```
+
+
+This second MA plot uses `alpha` = `r metadata(resList[[1]])$alpha / 2` and can be used agains the first MA plot to identify which features have adjusted p-values between `r metadata(resList[[1]])$alpha / 2` and `r metadata(resList[[1]])$alpha`.
+
+
+## Top `r nBest` features {.tabset}
+
+
+```{r 'MAplotalpha-nBest', results='asis'}
+## MA plot with alpha corresponding to the one that gives the nBest features
+nBest.actual <- min(nBest, nrow(head(res.df, n = nBest)))
+nBest.alpha <- head(res.df, n = nBest)$padj[nBest.actual]
+for (i in 1:length(resList)) {
+contrast = gsub(pattern = "log2.*Time\ ",
+                replacement =  "",
+                x = resList[[i]]@elementMetadata[[2]][2])
+cat("###", contrast, " \n")
+DESeq2::plotMA(resList[[i]], alpha = nBest.alpha * 1.00000000000001,
+    main = paste('MA plot for top', nBest.actual, 'features',',',contrast))
+cat('\n\n')
+}
+```
+
+The third and final MA plot uses an alpha such that the top `r nBest.actual` features are shown in the plot. These are the features that whose details are included in the _top features_ interactive table.
+
+
+# P-values {.tabset}
+
+## Distribution of all p-values
+
+```{r pvalueHistogram, collapse=TRUE}
+## P-value histogram plot
+
+ggplot(allResults, aes(x = pvalue)) +
+    geom_histogram(alpha=.5, position='identity', bins = 50) +
+    labs(title='Histogram of unadjusted p-values') +
+    xlab('Unadjusted p-values') +
+    facet_wrap( ~ contrast, ncol = 2)
+  
+
+```
+
+This plot shows a histogram of the unadjusted p-values. It might be skewed right or left, or flat as shown in the [Wikipedia examples](https://en.wikipedia.org/wiki/Histogram#Examples). The shape depends on the percent of features that are differentially expressed. For further information on how to interpret a histogram of p-values check [David Robinson's post on this topic](http://varianceexplained.org/statistics/interpreting-pvalue-histogram/).
+
+```{r pvalueSumm}
+## P-value distribution summary
+summary(allResults$pvalue)
+```
+
+This is the numerical summary of the distribution of the p-values.
+
+
+```{r pvalueTable, results = 'asis'}
+## Split features by different p-value cutoffs
+pval_table <- lapply(c(1e-04, 0.001, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5,
+    0.6, 0.7, 0.8, 0.9, 1), function(x) {
+    data.frame('Cut' = x, 'Count' = sum(allResults$pvalue <= x, na.rm = TRUE))
+})
+pval_table <- do.call(rbind, pval_table)
+kable(pval_table, format = 'markdown', align = c('c', 'c'))
+```
+
+This table shows the number of features with p-values less or equal than some commonly used cutoff values. 
+
+## Distribution of adjusted p-values
+
+```{r padjHistogram, collapse=TRUE}
+## Adjusted p-values histogram plot
+ggplot(allResults, aes(x = padj)) +
+    geom_histogram(alpha=.5, position='identity', bins = 50) +
+    labs(title=paste('Histogram of', elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)])) +
+    xlab('Adjusted p-values') +
+    xlim(c(0, 1.0005)) +
+  facet_wrap( ~ contrast, ncol = 2, scales="free")
+```
+
+This plot shows a histogram of the `r elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)]`. It might be skewed right or left, or flat as shown in the [Wikipedia examples](https://en.wikipedia.org/wiki/Histogram#Examples). 
+
+```{r padjSumm}
+## Adjusted p-values distribution summary
+summary(res.df$padj)
+```
+
+This is the numerical summary of the distribution of the `r elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)]`.
+
+
+```{r padjTable, results = 'asis'}
+## Split features by different adjusted p-value cutoffs
+padj_table <- lapply(c(1e-04, 0.001, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5,
+    0.6, 0.7, 0.8, 0.9, 1), function(x) {
+    data.frame('Cut' = x, 'Count' = sum(res.df$padj <= x, na.rm = TRUE))
+})
+padj_table <- do.call(rbind, padj_table)
+kable(padj_table, format = 'markdown', align = c('c', 'c'))
+```
+
+This table shows the number of features with `r elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)]` less or equal than some commonly used cutoff values. 
+
+
+# Tables of top features
+
+This table shows the significant DEGs (passing all filtering criteria) ordered by their absolute fold change. Use the search function to find your feature of interest or sort by one of the columns. You can limit to a single contrast if desired.
+
+```{r 'topFeatures', results = 'asis'}
+searchURL <- "http://www.ncbi.nlm.nih.gov/gene/?term="
+## Add search url if appropriate
+res.df.dt <- res.df
+if(!is.null(searchURL)) {
+    res.df.dt$ensembl_gene_id <- paste0('<a href="',
+                             searchURL,
+                             res.df.dt$ensembl_gene_id,
+                             '" rel="noopener noreferrer" target="_blank">',
+                             res.df.dt$ensembl_gene_id,
+                             '<br/>',
+                             res.df.dt$mgi_symbol,
+                             '</a>')
+}
+
+for(i in which(colnames(res.df.dt) %in% c('pvalue', 'padj'))) res.df.dt[, i] <- format(res.df.dt[, i], scientific = TRUE)
+res.df.dt <- res.df.dt[,!names(res.df.dt) %in% c("mgi_description", "mgi_symbol")]
+DT::datatable(res.df.dt,
+          options = list(pagingType='full_numbers',
+                         pageLength=20,
+                         scrollX='100%',
+                         dom = 'Bfrtip',
+                         buttons = c('copy', 'csv', 'excel', 'pdf', 'print', 'colvis'),
+                         columnDefs = list(list(visible=FALSE, targets=c(2,4,5)))),
+          escape = FALSE,
+          extensions = 'Buttons',
+          rownames = FALSE,
+          filter = "top",
+          colnames = c('Ensembl' = 'ensembl_gene_id')) %>% 
+  DT::formatRound(which(!colnames(res.df.dt) %in% c('pvalue', 'padj', 'Feature', 'contrast', 'mgi_description', 'ensembl_gene_id', 'mgi_symbol' )), digits)
+
+```
+
+
+# Gene-level plots for top `r nBestFeatures` features
+
+This section contains plots showing the normalized counts per sample for each group of interest. Only the best `r nBestFeatures` features are shown, ranked by their absolute fold change values. The Y axis is on the log10 scale and the feature name is shown in the title of each plot.
+
+
+```{r 'plotCounts'}
+plotCounts_gg <- function(i, dds, intgroup) {
+    data <- plotCounts(dds,
+                       gene=i,
+                       intgroup=intgroup,
+                       returnData = TRUE)
+    ggplot(data, aes(x = data[,2], y = data[,1])) + 
+      geom_point() + 
+      ylab('Normalized count') +
+      xlab('Group') + 
+      ggtitle(paste0(i, " ", mgi_id_table$mgi_symbol[mgi_id_table$ensembl_gene_id == i])) + 
+      coord_trans(y = "log10") + 
+      theme(axis.text.x = element_text(angle = 90, hjust = 1))
+}
+
+genesToPlot <- significantResults %>% arrange(-abs(log2FoldChange))
+
+for(i in head(unique(genesToPlot$ensembl_gene_id), nBestFeatures)) {
+    print(plotCounts_gg(i, dds = dds, intgroup = intgroup))
+}
+
+```
+
+# Plots of genes of interest
+
+This section shows genes of interest sorted by those with highest fold-change within each contrast.
+
+```{r 'plot_genes_of_interest', fig.width=16, fig.height=12}
+
+#numResults=20
+numResults <- nBestFeatures
+
+allResultsOrdered_logFC_filter %>%
+  group_by(contrast) %>%
+  top_n(numResults, wt=abs(log2FoldChange)) %>%
+  ungroup() %>%
+  mutate(contrast=as.factor(contrast),
+         mgi_symbol=reorder_within(mgi_symbol,log2FoldChange, contrast)) %>%
+  ggplot(aes(x=log2FoldChange,
+             y=mgi_symbol,
+             color=contrast,
+             size=-log(padj))) +
+  geom_point(show.legend = TRUE) +
+  facet_wrap(~contrast,
+             scales="free_y",
+             ncol=4,
+             labeller = labeller(contrast = label_wrap_gen(10))) +
+  scale_y_reordered()  +
+  geom_vline(xintercept=0,
+             linetype="dashed",
+             color = "black",
+             size=1) +
+  ggtitle(paste0("Top ",
+                 numResults,
+                 " genes ranked by fold change (adjusted p-value <",
+                 alpha,
+                 "), grouped by treatment"))
+```
+
+# Volcano plot
+
+This section shows a volcano plot for each contrast.  
+Note that scales are set manually for this plot: therefore, there may be data points outside the range shown (see warnings).
+
+```{r 'volcano-plot', fig.width=16, fig.height=12, warning=TRUE, collapse=TRUE}
+ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
+  geom_point(size=0.1, alpha=0.5) +
+  facet_wrap(~contrast, ncol=4) + # , scales="free"
+  geom_vline(xintercept=c(-1.5,1.5), color="red", alpha=1.0)+ 
+  geom_hline(yintercept=-log10(0.05), color="blue", alpha=1.0) +
+  scale_x_continuous(name = "log2 Fold Change", limits = c(-5,5)) + # 
+  scale_y_continuous(name = "-log10 adjusted p-value", limits = c(0,6)) # 
+```
+
+```{r 'bmdexpress_input', collapse=TRUE}
+
+###########################################################################################
+######## PRODUCE INPUT FOR BMDExpress2 ####################################################
+###########################################################################################
+
+# # Create input file...
+# bmdexpress <- as.data.frame(lognorm.read.counts) # log2 normalized, size factor normalized
+# bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
+# bmdexpress <- rbind( Dose=c("Dose",as.character(DESeqDesign$Genotype_Treatment_Time)), bmdexpress, stringsAsFactors=F)
+# # bmdexpress <- rbind( Dose=c("Dose","0","1","2"), bmdexpress, stringsAsFactors=F)
+# write.table(bmdexpress, file = "bmdexpress_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+
+```
+
+# GO Enrichment Analysis {.tabset}
+
+This section performs GO enrichment on **all DEGs passing filters**.
+
+```{r cluster-profiler, warning=FALSE, message=FALSE, collapse=TRUE}
+## Remember that dds had ENSEMBL ids for the genes
+# ensemblNames <- gsub("\\..*", "", rownames(dds))
+
+ensemblDEGs <- significantResults$ensembl_gene_id
+head(ensemblDEGs)
+
+##### TO DO: Add multiple panels for each contrast.
+##### Use "all" argument to only run each once..?
+
+## Not all genes have a p-value
+table(!is.na(resList[[1]]$padj))
+
+enrich_go_all <- enrichGO(gene = ensemblDEGs,
+                         universe = row.names(assay(dds)),
+                         OrgDb = org.Mm.eg.db,
+                         keyType = "ENSEMBL",
+                         ont = "all",
+                         pAdjustMethod = "BH",
+                         pvalueCutoff = 0.01,
+                         qvalueCutoff = 0.05)
+
+# clusterProfiler::dotplot(enrich_go_all, font.size=9, showCategory=10, split="ONTOLOGY")  +
+#   theme(axis.text.y = element_text(angle = 0)) +
+#   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 50)) +
+#   facet_wrap(~ONTOLOGY)
+
+## Perform enrichment analysis for Biological Process (BP)
+enrich_go_bp <- enrichGO(gene = ensemblDEGs,
+                         universe = row.names(assay(dds)),
+                         OrgDb = org.Mm.eg.db,
+                         keyType = "ENSEMBL",
+                         ont = "BP",
+                         pAdjustMethod = "BH",
+                         pvalueCutoff = 0.01,
+                         qvalueCutoff = 0.05)
+
+enrich_go_mf <- enrichGO(gene = ensemblDEGs,
+                         universe = row.names(assay(dds)),
+                         OrgDb = org.Mm.eg.db,
+                         keyType = "ENSEMBL",
+                         ont = "MF",
+                         pAdjustMethod = "BH",
+                         pvalueCutoff = 0.01,
+                         qvalueCutoff = 0.05) 
+
+enrich_go_cc <- enrichGO(gene = ensemblDEGs,
+                         universe = row.names(assay(dds)),
+                         OrgDb = org.Mm.eg.db,
+                         keyType = "ENSEMBL",
+                         ont = "CC",
+                         pAdjustMethod = "BH",
+                         pvalueCutoff = 0.01,
+                         qvalueCutoff = 0.05)
+
+```
+
+## Biological processes
+
+```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
+clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
+  theme(axis.text.y = element_text(angle = 0)) +
+  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+```
+
+## Molecular Functions
+
+```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
+clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
+   theme(axis.text.y = element_text(angle = 0)) +
+  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+```
+
+## Cellular Component
+
+```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
+clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
+   theme(axis.text.y = element_text(angle = 0)) +
+  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+
+```
+
+# Pathway Analysis using WikiPathways
+
+## All DEGs
+
+```{r 'pathway_analysis', collapse=TRUE}
+
+entrez_IDs <- as.character(mgi_id_table_entrez$entrezgene_id)
+entrezDEGs <- dplyr::left_join(significantResults,
+                               mgi_id_table_entrez,
+                               by="ensembl_gene_id")
+entrezDEGs <- as.vector(entrezDEGs$entrezgene_id)
+
+mouseWiki <- rWikiPathways::downloadPathwayArchive(organism="Mus musculus", format = "gmt")
+wp2gene <- clusterProfiler::read.gmt(mouseWiki)
+wp2gene <- wp2gene %>% tidyr::separate(ont, c("name","version","wpid","org"), "%")
+wpid2gene <- wp2gene %>% dplyr::select(wpid,gene) #TERM2GENE
+wpid2name <- wp2gene %>% dplyr::select(wpid,name) #TERM2NAME
+wpid2gene
+wpid2name
+
+DEG_pathways <- clusterProfiler::enricher(
+        entrezDEGs,
+        universe = entrez_IDs,
+        pAdjustMethod = "fdr",
+        pvalueCutoff = 0.05, #p.adjust cutoff
+        TERM2GENE = wpid2gene,
+        TERM2NAME = wpid2name)
+DEG_pathways <- DOSE::setReadable(DEG_pathways, org.Mm.eg.db, keyType = "ENTREZID")
+
+clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
+  theme(axis.text.y = element_text(angle = 0)) +
+  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+```
+
+## By contrast {.tabset}
+
+
+```{r 'pathway_analysis_by_contrast_make_plots', collapse=TRUE}
+plotList <- list()
+for (i in 1:length(levels(significantResults$contrast))) {
+  entrezDEGs <- dplyr::left_join(significantResults[significantResults$contrast==levels(significantResults$contrast)[i],],
+                                 mgi_id_table_entrez,
+                                 by="ensembl_gene_id")
+  entrezDEGs <- entrezDEGs$entrezgene_id
+  DEG_pathways <- clusterProfiler::enricher(
+          entrezDEGs,
+          universe = entrez_IDs,
+          pAdjustMethod = "fdr",
+          pvalueCutoff = 0.05, #p.adjust cutoff
+          TERM2GENE = wpid2gene,
+          TERM2NAME = wpid2name)
+  DEG_pathways <- DOSE::setReadable(DEG_pathways, org.Mm.eg.db, keyType = "ENTREZID")
+  plotList[[i]] <- clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
+     theme(axis.text.y = element_text(angle = 0)) +
+    scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+}
+```
+
+
+```{r 'pathway_analysis_by_contrast_print_plots', results='asis'}
+for (i in 1:length(levels(significantResults$contrast))) {
+  cat("###", levels(significantResults$contrast)[i], " \n")
+  print(plotList[[i]])
+  cat('\n\n')
+}
+
+```
+
+# Session Info
+
+Date the report was generated.
+
+```{r reproducibility1, echo=FALSE}
+## Date the report was generated
+Sys.time()
+```
+
+Wallclock time spent generating the report.
+
+```{r reproducibility2, echo=FALSE}
+## Processing time in seconds
+totalTime <- diff(c(startTime, Sys.time()))
+round(totalTime, digits=3)
+```
+
+`R` session information.
+
+```{r reproducibility3, echo=FALSE}
+## Session info
+options(width = 120)
+session_info()
+```
+
+Pandoc version used: `r rmarkdown::pandoc_version()`.
+
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
