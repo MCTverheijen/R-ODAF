@@ -50,6 +50,6 @@ vignettes/*.pdf
 *sam
 *results
 /DEG_output*
-/paths.txt
+*paths.txt
 
 # test
