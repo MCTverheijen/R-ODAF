@@ -45,11 +45,10 @@ vignettes/*.pdf
 *fastq.gz
 *fa
 *fna
+*fasta
 *bam
 *sam
 *results
-/data/processed/*
-/data/output/*
 /DEG_output*
 /paths.txt
 

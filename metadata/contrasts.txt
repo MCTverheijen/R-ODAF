@@ -1,0 +1,6 @@
+m2	m0
+m1k	m0
+m5k	m0
+f2	f0
+f1k	f0
+f5k	f0
