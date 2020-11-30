@@ -1,7 +1,7 @@
 ---
-title: "Transcriptome Profiling of Rat Liver exposed to Hexabromocyclododecane (HBCD)"
+title: "Transcriptome Profiling"
 author: "Matthew J. Meier"
-subtitle: "RNASeq Analysis: Report for TRF case study"
+subtitle: "RNASeq Analysis"
 output:
   html_document:
     toc: true
@@ -20,10 +20,10 @@ knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = e
   
 *Current version: 1*  
 Date report generated: `r format(Sys.time(), '%d %B, %Y')`  
-Report prepared for: TRF Group  
+Report prepared for: Name  
 Purpose of report:
 
-* Excercise to analyze RNASeq data
+* Exercise to analyze RNA-Seq data
 
 **Previous revisions**  
 
@@ -61,9 +61,6 @@ message("WARNING WARNING WARNING!!! This report was produced to TEST PLOTTING FU
 ## Record start time
 startTime <- Sys.time()
 
-## Set libPaths
-.libPaths(c("/home/mpiage/R/x86_64-pc-linux-gnu-library/3.6",.libPaths()))
-
 ## Bioconductor
 library('DESeq2')
 library('edgeR')
@@ -73,7 +70,7 @@ library('rWikiPathways')
 
 ## CRAN
 library('ggplot2')                                 
-theme_set(theme_bw())
+theme_set(theme_classic())
 library('knitr')
 library('RColorBrewer')
 library('viridis')
