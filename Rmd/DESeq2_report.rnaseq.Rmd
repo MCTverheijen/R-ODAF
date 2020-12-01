@@ -44,7 +44,8 @@ library('knitr')
 # Set so that long lines in R will be wrapped:
 opts_chunk$set(bootstrap.show.code = FALSE, bootstrap.panel = TRUE, cache = TRUE) # tidy.opts=list(width.cutoff=60), tidy=TRUE, crop = NULL
 # Set this variable to FALSE if you only want to run the plotting functions by reloading the last RData file.
-flag=TRUE
+flag=TRUE # To eveluate analysis chunks
+if (flag==FALSE) { load("Partial_analysis.RData") }
 # Set this variable to TRUE if you would like to embed the files directly into the HTML for portability. This slows down page responsiveness drastically, since the files are generally quite large.
 embedFiles=FALSE
 # Se this variable to be TRUE if you want to have separate plots of top genes as defined in the R-ODAF template
@@ -52,7 +53,7 @@ R_ODAF_plots=FALSE
 ```
 
 ```{r 'warn_user', eval=!flag}
-message("WARNING WARNING WARNING!!! This report was produced to TEST PLOTTING FUNCTIONS ONLY and should be used exclusively for testing and development.")
+message("If this text is visible by default, this report was produced to test plotting functions and should be used exclusively for testing and development.")
 ```
 
 ```{r setup, warning=FALSE, message=FALSE}
@@ -61,16 +62,22 @@ message("WARNING WARNING WARNING!!! This report was produced to TEST PLOTTING FU
 ## Record start time
 startTime <- Sys.time()
 
+## Set libPaths
+.libPaths(c("/home/mpiage/R/x86_64-pc-linux-gnu-library/3.6",.libPaths()))
+
 ## Bioconductor
 library('DESeq2')
 library('edgeR')
-library('org.Mm.eg.db')
+#library('org.Ca.eg.db') # MOUSE: library('org.Mm.eg.db') # HUMAN: library('org.Hs.eg.db') # RAT: library('org.Rn.eg.db') # HAMSTER: library('org.Ca.eg.db')
+library('AnnotationHub')
+OrgDb.Ma <- query(AnnotationHub(), c("OrgDb","Mesocricetus auratus"))[[1]] # Golden Hamster
 library('enrichplot')
 library('rWikiPathways')
+library('BiocParallel')
 
 ## CRAN
 library('ggplot2')                                 
-theme_set(theme_classic())
+theme_set(theme_bw())
 library('knitr')
 library('RColorBrewer')
 library('viridis')
@@ -100,6 +107,8 @@ invisible(suppressPackageStartupMessages(lapply(packages, function(x)require(x, 
 options(java.parameters = "-Xmx10000m")
 ```
 
+The code above (not shown by default) loads the relevant R packages required for analysis.
+
 ## Specify parameters
 
 ```{r setup_code, warning=FALSE, message=FALSE, collapse=TRUE}
@@ -117,14 +126,15 @@ options(java.parameters = "-Xmx10000m")
 	SampleKeyFile <- "metadata.txt" #This tab delimited file contains at least 2 columns: NAME (sample names identical to the column names of sampleData) and Compound (needs to identify to which group the sample belongs -> ExperimentalGroup & ControlGroup)
 	ContrastsFile <- "contrasts.txt" #This tab delimited file contains one row per contrast, with the control for comparison in the right column and the comparison in the left column
 # Specify which groups need to be compared 
-	contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="", header=FALSE,  quote="\"")
-	short_contrast_names <- contrasts # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
+	contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="\t", header=FALSE,  quote="\"")
+	short_contrast_names <- paste(contrasts$V1,"v.",contrasts$V2) # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
 	intgroup <- DESIGN <- "group"	#Column name which defines the groups to be compared
   nBestFeatures <- 20 # The number of best features to make plots of their counts
   nBest <- 100 # Number of features to include in table and limiting PCA/clustering analysis
-  nHeatmap <- 50 # Number of genes for heatmap
+  nHeatmap <- 50 # Number of most variable genes for heatmap
+  nHeatmapDEGs <- 50 # Number of DEGs for heatmap
 # Set analysis ID. This ID will be used as prefix for the output files
-	analysisID <-"2020_TRF"
+	analysisID <-"2020_"
 # Specify used platform/technology for data generation:
 	Platform <- "RNA-Seq" # Specify "RNA-Seq" or "TempO-seq"
 
@@ -133,6 +143,8 @@ options(java.parameters = "-Xmx10000m")
 ```
 
 The code above (not shown by default) specifies user preferences and data locations.
+
+The experimental comparisons of interest are as follows: `r short_contrast_names`.
 
 ## Load data
 
@@ -151,7 +163,7 @@ DESeqDesign <- read.delim(SampleKeyFile,
                           sep="\t",
                           header=TRUE,
                           quote="\"",
-                          row.names="accession")
+                          row.names="name") # Pick column that is used in ID
 
 NORM_TYPE<-paste0(analysisID, "_DESeq2_", Platform)
 
@@ -160,14 +172,10 @@ if(!dir.exists(plotdir)) {dir.create(plotdir)}
 barplot.dir<- paste(plotdir, "/barplot_genes/", sep="")
 if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
 
-# First data clean-up: replace NA & remove samples with total readcount < threshold
-sampleData[ is.na(sampleData) ] <- 0 
-sampleData <- sampleData[,(colSums(sampleData)>1000000)] # 1 million reads required per sample
-# Some extra cleanup
-colnames(sampleData) <- gsub(pattern="^0", replacement="", x=colnames(sampleData))
+
 ```
 
-The code above (not shown by default) loads user-provided sample data and meta data.
+The code above (not shown by default) loads user-provided meta data (i.e., information about your experiment, also known as colData, or, column data). This also imports the countx matrix (i.e., a table of observed counts in which each sample is a column and genes are rows).
 
 ## Run DESeq2
 
@@ -177,8 +185,37 @@ The code above (not shown by default) loads user-provided sample data and meta d
 ##########
 print(NORM_TYPE) # Name of experiment
 
-all(rownames(DESeqDesign) %in% colnames(sampleData)) # Sanity check: each sample name (row) in the metadata should have a corresponding column in the count data
+# First data clean-up: replace NA & remove samples with total readcount < threshold
+threshold = 1000000
+initialSampleDataCount <- ncol(sampleData)
+sampleData[ is.na(sampleData) ] <- 0 
+sampleData <- sampleData[,(colSums(sampleData) > threshold)] # 1 million reads required per sample
+filteredSampleDataCount <- ncol(sampleData)
+# Sometimes extra cleanup may be needed
+# colnames(sampleData) <- gsub(pattern="^0", replacement="", x=colnames(sampleData))
+
+samples_before <- nrow(DESeqDesign)
+DESeqDesign$original_names <- rownames(DESeqDesign)
+metadata_in_sampledata <- all(rownames(DESeqDesign) %in% colnames(sampleData)) # Sanity check: each sample name (row) in the metadata should have a corresponding column in the count data
+sampledata_in_metadata <- all(colnames(sampleData) %in% rownames(DESeqDesign)) # Sanity check: each sample name (row) in the metadata should have a corresponding column in the count data
+removed <- colnames(sampleData[which(!colnames(sampleData) %in% rownames(DESeqDesign))])
 DESeqDesign <- DESeqDesign[(colnames(sampleData)),] # Reorder the metadata table to correspond to the order of columns in the count data
+DESeqDesign <- na.omit(DESeqDesign)
+DESeqDesign <- DESeqDesign[ DESeqDesign$treatment != "human reference RNA",] # Remove samples manually
+sampleData <- sampleData[,(rownames(DESeqDesign))]
+samples_after <- nrow(DESeqDesign)
+
+
+# For TempO-Seq: Limit sampleData matrix to genes in the assay.
+if (Platform=="TempO-Seq") {
+biospyder <- read.delim("~/dbs/biospyder/191113_Human_S1500_Surrogate_2.0_Manifest.csv", # Assay manifest...
+                          stringsAsFactors=FALSE,
+                          sep="\t",
+                          header=TRUE,
+                          quote="\"")
+sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,]
+}
+
 head(rownames(DESeqDesign))
 head(colnames(sampleData)) # Output should match
 
@@ -188,20 +225,22 @@ if (file.exists("dds.Rdata")) {
   load("./dds.Rdata")
   if (!identical(as.data.frame(round(counts(dds))),
                  round(sampleData),0)) {
-    next
+    print("Not identical")
     }
   } else {
   dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
                                 colData = as.data.frame(DESeqDesign),
                                 design = ~group )
   dds <- dds[, rownames(DESeqDesign)]
-  dds <- DESeq(dds)
+  dds <- dds[rowSums(counts(dds)) > 1]
+  dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(39))
   save(dds, file="./dds.Rdata")
   }
 
-#DESeqResults <- results(dds)
-#resOrdered <- DESeqResults[order(DESeqResults$pvalue),]
-#summary(resOrdered)
+# ### REMOVE if done above from scratch
+# keep <- grep(colData(dds)$chemical, pattern="cells", invert=T, ignore.case = T)
+# dds <- dds[,keep]
+# dds <- dds[row.names(dds) %in% biospyder$ENSEMBL_GENE_ID,]
 
 # Another sanity check to make sure the object looks correct
 resultsNames(dds)
@@ -215,29 +254,43 @@ if (Platform=="RNA-Seq"){
   MinCount<- 1
   alpha <- pAdjValue <- 0.05 # Relaxed from 0.01
   linear_fc_filter = 1.5
-} else if (Platform=="TempO-seq") {
+} else if (Platform=="TempO-Seq") {
   MinCount<- 0.5
-  pAdjValue<- 0.05 
+  alpha <- pAdjValue<- 0.05 
+  linear_fc_filter = 1.5
 } else { print("Platform/technology not recognized") }
 
 
 # Make regularized log object for later plotting
-rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
-
+#rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
+# Use vst for hundreds of samples!
+rld <- vst(dds) # Should this be blind?
+ 
 ```
 
-The code above (not shown by default) runs DESeq2.
+The code above (not shown by default) uses DESeq2 `r packageVersion("DESeq2")` to test for differentially abundant genes within the `r Platform` data.  
+
+Prior to running DESeq2, the data was filtered to remove samples that do not have `r threshold` reads per sample.  
+
+The user-provided metadata initially included `r samples_before` samples.  
+
+The count matrix initially included `r initialSampleDataCount` samples (including any reference material samples). After removing samples with less than `r threshold` reads, `r filteredSampleDataCount` samples were left. It is `r metadata_in_sampledata` that all the samples provided in the metadata table were also identified in the count matrix. It is `r sampledata_in_metadata` that all the samples in the count matrix were also identified in the metadata table.  
+
+Following the removal of other samples (i.e., reference RNA, etc.), there were `r samples_after` samples remaining in the experiment. The samples excluded from analysis were named: `r paste(removed)`.    
 
 ## Sample data (metadata about your experiment) 
+
+This table shows the final list of samples that were used in the data analysis (as well as corresponding sample information as it was communicated to the Genomics Laboratory).  
 
 ```{r print_metadata}
 knitr::kable(DESeqDesign,
              row.names =  F,
              caption="User-provided information about samples and experimental conditions") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
+  scroll_box(width = "720px")
 ```
 
-## Run R-ODAF Code
+## Load R-ODAF functions
 
 ```{r 'define-ODAF-functions', collapse=TRUE, warning=FALSE, message=FALSE}
 ###################################################################################
@@ -288,10 +341,12 @@ draw.barplots<-function(samples, top_bottom, NUM){
 ###################################################################################
 ```
 
-The code above (not shown by default) loads in plotting functions specific to the R-ODAF template.
+The code above (not shown by default) loads in plotting functions specific to the Omics Data Analysis Frameworks for Regulatory application (R-ODAF) template. More information on the R-ODAF framework is available [here](https://github.com/MCTverheijen/R-ODAF).
+
+## Run pairwise comparisons
 
 ```{r 'run_ODAF_code', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
-
+cooks <- FALSE # Normally set Cook's cutoff to false
 resList <- list()
 for (x in 1:nrow(contrasts)) {	## for all comparisons to be done	
 	
@@ -300,9 +355,9 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	print(paste(condition2, " vs ", condition1, ":", NORM_TYPE))
 	
 	DE_Design <- matrix(data=NA, ncol=2)
-	DE_Design <- DESeqDesign [c(grep(condition1,DESeqDesign[,DESIGN]), grep(condition2,DESeqDesign[,DESIGN])),]
+	DE_Design <- DESeqDesign[c(grep(condition1,DESeqDesign[,DESIGN]), grep(condition2,DESeqDesign[,DESIGN])),]
 	samples <- sampleData[, rownames(DE_Design) ]
-	colnames(samples)<-NULL
+	colnames(samples) <- NULL
 	
 	###########
 
@@ -314,7 +369,7 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 		Counts<-counts(dds, normalized=TRUE)
 		CPMdds<-cpm(counts(dds, normalized=TRUE))
 		for (gene in 1:nrow(dds)) {
-			GroupsPass<-checkSpike<-NULL
+			GroupsPass <- checkSpike<-NULL
 			for (group in 1:length(SampPerGroup)) { #test if group passes
 				sampleCols<-grep(dimnames(SampPerGroup)[[1]][group],DE_Design[,DESIGN])
 				Check<-sum(CPMdds[gene,sampleCols] >= MinCount)>= 0.75*SampPerGroup[group]
@@ -335,9 +390,10 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	print("Obtaining the DESeq2 results")
 	currentContrast <- c(DESIGN, condition2, condition1)
 	res <- results(dds[idx],
+	               parallel = TRUE, BPPARAM=MulticoreParam(39),
 	               contrast=currentContrast,
 	               pAdjustMethod= 'fdr',
-	               cooksCutoff=FALSE) # Cooks cutoff disabled - manually inspect.
+	               cooksCutoff=cooks) # Cooks cutoff disabled - manually inspect.
 	res <- lfcShrink(dds=dds[idx],
 	                 contrast=currentContrast,
 	                 res=res,
@@ -346,7 +402,7 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	ODAFdir <- paste(outputdir, "/R-ODAF/", sep="")
 	if(!dir.exists(ODAFdir)) {dir.create(ODAFdir)}
 	setwd(ODAFdir)
-	FileName<-paste(NORM_TYPE, condition2,"vs",condition1, "FDR", pAdjValue, sep="_")		
+	FileName <- paste(NORM_TYPE, condition2,"vs",condition1, "FDR", pAdjValue, sep="_")		
 	#Save output tables		
 	norm_data <<- counts(dds[idx],normalized=TRUE)
 	colnames(norm_data) <- colData(dds)[,DESIGN]
@@ -354,7 +410,7 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	write.table(FlagSpike,file=paste0(FileName, "_FlaggedSpikes.txt"), sep="\t", quote=FALSE)
 	DEsamples <<- subset(res,res$padj < pAdjValue)	
 	write.table(DEsamples,file=paste0(FileName,"_DEG_table.txt"), sep="\t", quote=FALSE)
-	DEspikes<<- DEsamples[rownames(DEsamples)%in%NameRows,]	
+	DEspikes <<- DEsamples[rownames(DEsamples)%in%NameRows,]	
 	write.table(DEspikes,file=paste0(FileName,"_DEspikes_table.txt"), sep="\t",quote=FALSE)
 
 	resList[[x]] <- res
@@ -383,35 +439,42 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 }
 ```
 
-The code above (not shown by default) runs the R-ODAF spurious spike detection and outputs the DESeq Results objects as a list for each contrast.
+The code above (not shown by default) runs the R-ODAF spurious spike detection and outputs the DESeq Results objects as a list for each contrast. As specified by the R-ODAF guidelines, 75% of at least 1 group need to be above `r MinCount` CPM and spurious spikes were removed in which Max-Median > Sum/(Rep+1).  
+
+The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`. An alpha of `r resList[[1]]@metadata$alpha` was used to extract raw results, which are reported as the `r gsub(mcols(x=resList[[1]])$description[[4]],pattern=":.*",replacement="")`. To account for multiple testing, `r mcols(resList[[1]])$description[5]` are reported. Cook's cutoff was set to `r cooks` in this analysis.  
+
 
 ## Create summary tables
 
 ```{r create_tables, collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
 #listEnsembl()
 #listMarts()
-ensembl <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+#listDatasets(useMart('ensembl'))
+ensembl <- useMart("ensembl", dataset = "mauratus_gene_ensembl",  host = "useast.ensembl.org") #  Mouse: "mmusculus_gene_ensembl" # Human: "hsapiens_gene_ensembl" # Golden hamster: mauratus_gene_ensembl # Rat: rnorvegicus_gene_ensembl
 #listAttributes(ensembl)
 #listFilters(ensembl)
 
 genes <- row.names(resList[[1]])
+
 #genes_all <- unique(row.names(assay(dds)))
 setwd(outputdir)
 if (file.exists("id_table.Rdata")) {
   print(paste("Already found ID table; skipping biomaRt query and loading from disk."))
   load("./id_table.Rdata")
-  mgi_id_table <- mgi_id_table_entrez[,1:3]
+  id_table <- id_table_entrez[,1:3]
   } else {
-  mgi_id_table_entrez <- getBM(filters="ensembl_gene_id",
+  id_table_entrez <- getBM(filters="ensembl_gene_id",
                         attributes= c("ensembl_gene_id",
-                                      "mgi_symbol",
-                                      "mgi_description",
+                                      "external_gene_name", # mgi_symbol for Mouse
+                                      "description",
                                       "entrezgene_id"), # "refseq_mrna" or "refseq_peptide" may be of interest, but can't join with gene tables.
                         values=genes,
                         mart=ensembl)
-  save(mgi_id_table_entrez, file="./id_table.Rdata")
-  mgi_id_table <- mgi_id_table_entrez[,1:3]
+  save(id_table_entrez, file="./id_table.Rdata")
+  id_table <- id_table_entrez[,1:3]
 }
+
+genes_entrezid <- dplyr::left_join(data.frame(ensembl_gene_id=genes), id_table_entrez, by="ensembl_gene_id")
 
 sigtabList <- list()
 alltablList <- list()
@@ -424,11 +487,11 @@ for (i in 1:length(resList)) {
   } else {
     sigTab <- cbind(ensembl_gene_id=row.names(resList[[i]]),
                     as(sigTab, "data.frame"),
-                    contrast = gsub(pattern = "log2.*Time\ ",
+                    contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
                                     replacement =  "",
                                     x = resList[[i]]@elementMetadata[[2]][2]))
     sigTab <- dplyr::left_join(sigTab,
-                               mgi_id_table,
+                               id_table,
                                by="ensembl_gene_id")
     sigTab <- dplyr::mutate(sigTab, linearFoldChange=ifelse(log2FoldChange > 0,
                                                             2 ^ log2FoldChange,
@@ -437,19 +500,20 @@ for (i in 1:length(resList)) {
     sigTab <- sigTab[,c(1,8,9,2,3,10,4:7)] 
     alltablList[[i]] <- sigTab
     sigTab <- sigTab[!is.na(sigTab$padj) & sigTab$padj < alpha & abs(sigTab$linearFoldChange) > linear_fc_filter, ] ## FILTERS!
-    sigtabList[[i]] <- sigTab
+    sigtabList[[i]] <- sigTab %>% dplyr::distinct()
   }
 }
 # Write dataframe of all results
 sigtabList <- sigtabList[!sapply(sigtabList, is.null)]
 significantResults <- do.call(rbind, sigtabList)
+significantResults <- dplyr::distinct(significantResults)
 allResults <- do.call(rbind, alltablList)
 
 # All Results for Plotting
 # Replace NA gene symbols with ensembl ID
-allResults$mgi_symbol[is.na(allResults$mgi_symbol)] <- allResults$ensembl_gene_id[is.na(allResults$mgi_symbol)] 
-# Replace blan gene symbols with ensembl ID
-allResults$mgi_symbol[allResults$mgi_symbol == ""]  <- allResults$ensembl_gene_id[allResults$mgi_symbol == ""]  
+allResults$external_gene_name[is.na(allResults$external_gene_name)] <- allResults$ensembl_gene_id[is.na(allResults$external_gene_name)] 
+# Replace blank gene symbols with ensembl ID
+allResults$external_gene_name[allResults$external_gene_name == ""]  <- allResults$ensembl_gene_id[allResults$external_gene_name == ""]  
 allResults$padj[allResults$padj == 0] <- 10^-100 # For plotting purposes!
 allResultsOrdered_logFC_filter <- dplyr::filter(allResults, abs(linearFoldChange) > 1.5) %>%
   arrange(-abs(linearFoldChange))
@@ -460,30 +524,35 @@ degTable <- significantResults %>%
   dplyr::group_by(contrast) %>%
   dplyr::count()
 
-summaryTable <- data.frame( ensembl_gene_id=row.names(resList[[1]]),
-                            baseMean=resList[[1]]$baseMean )
+lengths <- lapply(resList, nrow)
+longest <- which.max(lengths)
+summaryTable <- data.frame( ensembl_gene_id=row.names(resList[[longest]]),
+                            baseMean=resList[[longest]]$baseMean )
 contrastsInSummary <- vector()
 for (i in 1:length(resList)) {
   print(i)
   n <- resList[[i]]@elementMetadata[[2]][2]
-  n <- gsub(pattern = paste0("log2\ fold\ change\ \\(MLE\\):\ ",DESIGN),
+  n <- gsub(pattern = paste0("log2\ fold\ change\ \\(MMSE\\):\ ",DESIGN), # Might need to be MLE for some tests
             replacement =  paste0("log2 Fold Change"),
             x = resList[[i]]@elementMetadata[[2]][2])
-  p <- gsub(pattern = paste0("log2\ fold\ change\ \\(MLE\\):\ ",DESIGN),
-           replacement =  resList[[i]]@elementMetadata[[2]][6],
+  p <- gsub(pattern = paste0("log2\ fold\ change\ \\(MMSE\\):\ ",DESIGN),
+           replacement =  resList[[i]]@elementMetadata[[2]][6], # Not used?
            x = resList[[i]]@elementMetadata[[2]][2])
-  q <- gsub(pattern = paste0("log2\ fold\ change\ \\(MLE\\):\ ",DESIGN,"\ "),
+  q <- gsub(pattern = paste0("log2\ fold\ change\ \\(MMSE\\):\ ",DESIGN,"\ "),
             replacement =  "",
             x = resList[[i]]@elementMetadata[[2]][2])
   message(n)
   message(p)
   message(q)
-  summaryTable <- cbind(summaryTable,
-                        log2FoldChange=resList[[i]]$log2FoldChange,
-                        linearFoldChange=ifelse(resList[[i]]$log2FoldChange > 0,
-                                                2 ^ resList[[i]]$log2FoldChange,
-                                                -1 / (2 ^ resList[[i]]$log2FoldChange)),
-                        padj=resList[[i]]$padj)
+  toJoin <- as.data.frame(resList[[i]])
+  setDT(toJoin, keep.rownames = T)[]
+  setnames(toJoin, 1, "ensembl_gene_id")
+  toJoin <- mutate(toJoin, linearFoldChange=ifelse(log2FoldChange > 0,
+                                                2 ^ log2FoldChange,
+                                                -1 / (2 ^ log2FoldChange)))
+  toJoin <- toJoin[,c(1:3,7,4:6)]
+  summaryTable <- dplyr::left_join(summaryTable, dplyr::select(toJoin, !c(baseMean,pvalue,lfcSE)), by="ensembl_gene_id")
+
   names(summaryTable)[[ncol(summaryTable)-2]] <- paste0("log2FoldChange_",i)
   names(summaryTable)[[ncol(summaryTable)-1]] <- paste0("linearFoldChange_",i)
   names(summaryTable)[[ncol(summaryTable)]] <- paste0("FDR_",i)
@@ -503,10 +572,10 @@ minPvals <- allResults %>%
   dplyr::select(ensembl_gene_id, padj)
 
 summaryTable <- summaryTable %>%
-  left_join(mgi_id_table, by="ensembl_gene_id") %>%
+  left_join(id_table, by="ensembl_gene_id") %>%
   left_join(maxFCs, by="ensembl_gene_id") %>%
   left_join(minPvals, by="ensembl_gene_id") %>%
-  rename(maxFoldChange = linearFoldChange,
+  dplyr::rename(maxFoldChange = linearFoldChange,
          minFDR_pval = padj
          ) %>%
   mutate(maxFoldChange=abs(maxFoldChange))
@@ -519,14 +588,14 @@ summaryTable <- summaryTable[,c(1,
                                 2:colPositionsOfData)]
 
 CPMddsDF <- data.frame(ensembl_gene_id = row.names(CPMdds), CPMdds, check.names=F)
-CPMddsDF <- dplyr::left_join(CPMddsDF, mgi_id_table, by="ensembl_gene_id")
+CPMddsDF <- dplyr::left_join(CPMddsDF, id_table, by="ensembl_gene_id")
 numColsToPrepend <- ncol(CPMddsDF) - ncol(CPMdds) - 1
 colPositionsToPrependSTART <- ncol(CPMddsDF) - numColsToPrepend + 1
 colPositionsOfData <- ncol(CPMddsDF) - numColsToPrepend
 CPMddsDF <- CPMddsDF[,c(1,colPositionsToPrependSTART:ncol(CPMddsDF),2:colPositionsOfData)]
 ```
 
-The code above (not shown by default) generates data frames summarzing the differentially expressed genes (DEGs).  
+The code above (not shown by default) generates tables summarzing the differentially expressed genes (DEGs).  
 
 Here is the number of DEGs in each group:
 
@@ -643,6 +712,8 @@ saveWorkbook(wb2, paste0("2.",NORM_TYPE,"-DESeq_all.xlsx"), overwrite = TRUE)
 wb3 <- createWorkbook()
 modifyBaseFont(wb3, fontSize = 10, fontName = "Arial Narrow")
 
+short_contrast_names <- stringr::str_trunc(short_contrast_names, 30, side="center")
+
 for (i in 1:length(levels(allResults$contrast))) {
   print(i)
   dataToWrite <- allResults[allResults$contrast==levels(allResults$contrast)[i],]
@@ -714,27 +785,43 @@ save.image(file = "Partial_analysis.RData")
 ```{r 'PCA'}
 ## Perform PCA analysis and make plot
 plotPCA(rld, intgroup = intgroup, ntop=nrow(assay(rld)))
-
 ## Get percent of variance explained
-data_pca <- plotPCA(rld, intgroup = intgroup, ntop=nrow(assay(rld)), returnData = TRUE)
+data_pca <- plotPCA(rld, intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld)), returnData = TRUE)
 percentVar <- round(100 * attr(data_pca, "percentVar"))
+
+# PCAplot <- plotPCA(rld, intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld)), returnData = TRUE)
+# ggplot(PCAplot, aes(PC1, PC2, color=dose)) + 
+#   geom_point(size=1) +
+#   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+#   ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+#   coord_fixed()
+
+
 ```
 
-The above plot shows the first two principal components that explain the variability in the data using the regularized log count data. If you are unfamiliar with principal component analysis, you might want to check the [Wikipedia entry](https://en.wikipedia.org/wiki/Principal_component_analysis) or this [interactive explanation](http://setosa.io/ev/principal-component-analysis/). In this case, the first and second principal component explain `r percentVar[1]` and `r percentVar[2]` percent of the variance respectively.
+This plot shows the first two principal components that explain the variability in the data using the regularized log count data. If you are unfamiliar with principal component analysis, you might want to check the [Wikipedia entry](https://en.wikipedia.org/wiki/Principal_component_analysis) or this [interactive explanation](http://setosa.io/ev/principal-component-analysis/). In this case, the first and second principal component explain `r percentVar[1]` and `r percentVar[2]` percent of the variance respectively.
 
 ## DEGs only
 
 ```{r 'PCA_DEGs'}
 rld_degs <- rld[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
 ## Perform PCA analysis and make plot
-plotPCA(rld_degs, intgroup = intgroup, ntop=nrow(rld_degs))
+plotPCA(rld_degs, intgroup = c("dose","group","treatment"), ntop=nrow(rld_degs)) #+ theme(legend.position = "none")
+PCAplotDEGs <- plotPCA(rld_degs, intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld_degs)), returnData = TRUE)
+
+# ggplot(PCAplotDEGs, aes(PC1, PC2, color=dose)) + 
+#   geom_point(size=1) +
+#   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+#   ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+#   facet_wrap(~group) +
+#   coord_fixed()
 
 ## Get percent of variance explained
 data_pcaDEGs <- plotPCA(rld_degs, intgroup = intgroup, returnData = TRUE, ntop=nrow(rld_degs))
 percentVarDEGs <- round(100 * attr(data_pcaDEGs, "percentVar"))
 ```
 
-The above plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarDEGs[1]` and `r percentVarDEGs[2]` percent of the variance respectively.
+This plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarDEGs[1]` and `r percentVarDEGs[2]` percent of the variance respectively.
 
 ## Top `r nBest` most variable genes only
 
@@ -754,7 +841,7 @@ data_pcaTop <- plotPCA(rld_top, intgroup = intgroup, returnData = TRUE, ntop=nro
 percentVarTop <- round(100 * attr(data_pcaTop, "percentVar"))
 ```
 
-The above plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarTop[1]` and `r percentVarTop[2]` percent of the variance respectively.
+This plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarTop[1]` and `r percentVarTop[2]` percent of the variance respectively.
 
 # Sample-to-sample distances {.tabset}
 
@@ -775,6 +862,7 @@ colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 ## Make the heatmap
 pheatmap(sampleDistMatrix, clustering_distance_rows = sampleDists,
     clustering_distance_cols = sampleDists, color = colors)
+
 ```
 
 This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
@@ -800,8 +888,10 @@ colnames(sampleDistMatrixDEGs) <- NULL
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 
 ## Make the heatmap
-pheatmap(sampleDistMatrixDEGs, clustering_distance_rows = sampleDistsDEGs,
-    clustering_distance_cols = sampleDistsDEGs, color = colors)
+pheatmap(sampleDistMatrixDEGs,
+         clustering_distance_rows = sampleDistsDEGs,
+         clustering_distance_cols = sampleDistsDEGs,
+         color = colors)
 ```
 
 This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data of all DEGs. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
@@ -824,8 +914,10 @@ colnames(sampleDistMatrixTop) <- NULL
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 
 ## Make the heatmap
-pheatmap(sampleDistMatrixTop, clustering_distance_rows = sampleDistsTop,
-    clustering_distance_cols = sampleDistsTop, color = colors)
+pheatmap(sampleDistMatrixTop,
+         clustering_distance_rows = sampleDistsTop,
+         clustering_distance_cols = sampleDistsTop,
+         color = colors)
 ```
 
 This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data of the top `r nBest` most variable genes. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
@@ -834,7 +926,7 @@ This plot shows how samples are clustered based on their euclidean distance usin
 
 ## All DEGs
 
-```{r 'heatmap_all_DEGs', collapse=TRUE}
+```{r 'heatmap_all_DEGs', collapse=TRUE, fig.height=10}
 
 mat <- assay(rld)[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
 mat <- mat - rowMeans(mat)
@@ -852,10 +944,85 @@ mat <- mat - rowMeans(mat)
 #          scale="row",
 #          breaks = mat_breaks)
 
-heatmap_df <- as.data.frame(colData(rld)[,c("Compound","Genotype","Timepoint")])
+heatmap_df <- as.data.frame(colData(rld)[,c("dose","group","treatment")]) # Customize!
 pheatmap(mat,
          annotation_col=heatmap_df,
          show_rownames = FALSE,
+         border_color = NA,
+         scale="row")
+# color = inferno(10)
+
+chems=unique(DESeqDesign$chemical)
+# plot_list=list()
+for (chem in chems){
+
+samples_for_heatmap <- DESeqDesign[which(DESeqDesign$chemical %in% c(chem, "DMSO 0.1%")),]$original_names
+mat_subset <- mat[,samples_for_heatmap]
+
+genes_for_heatmap_subset <- row.names(mat_subset)
+genes_for_heatmap_subset <- data.frame(ensembl_gene_id=row.names(mat_subset)) %>%
+  dplyr::left_join(id_table,
+                   by="ensembl_gene_id") %>%
+  dplyr::distinct()
+genes_for_heatmap_subset$external_gene_name[is.na(genes_for_heatmap_subset$external_gene_name)]  <- genes_for_heatmap_subset$ensembl_gene_id[is.na(genes_for_heatmap_subset$external_gene_name)]
+genes_for_heatmap$external_gene_name[which(genes_for_heatmap$external_gene_name=="")]  <- genes_for_heatmap$ensembl_gene_id[which(genes_for_heatmap$external_gene_name=="")] 
+row.names(genes_for_heatmap_subset) <- genes_for_heatmap_subset$ensembl_gene_id
+
+# pheatmap(mat_subset,
+#          #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
+#          annotation_col=dplyr::select(heatmap_df,-original_names),
+#          labels_row=genes_for_heatmap_subset[,2],
+#          border_color = NA,
+#          scale = "row",
+#          cutree_rows = 3,
+#          cutree_cols = 4)
+
+mat_subset_ordered <- mat_subset[,dplyr::arrange(heatmap_df[which(heatmap_df$original_names %in% samples_for_heatmap), ],dose)$original_names]
+
+# No clustering on columns
+pheatmap(mat_subset_ordered,
+         #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
+         annotation_col=dplyr::select(heatmap_df,-original_names),
+         cluster_cols = F,
+         labels_row=genes_for_heatmap_subset[,2],
+         border_color = NA,
+         scale = "row",
+         cutree_rows = 3,
+         cutree_cols = 4)
+
+# x=pheatmap(mat,
+#            annotation_col=heatmap_df,
+#            show_rownames = FALSE,
+#            border_color = NA,
+#            scale="row")
+#   plot_list[[a]] = x[[4]]     ##to save each plot into a list. note the [[4]]
+# }
+# do.call(grid.arrange,plot_list)
+
+}
+
+
+```
+
+## Top `r nHeatmapDEGs` differentially abundant genes
+
+```{r 'heatmap_top_degs', fig.height=10, fig.width=10, collapse=TRUE}
+mat_top <- assay(rld)[row.names(assay(rld)) %in% allResultsOrdered_logFC_filter[1:nHeatmapDEGs,]$ensembl_gene_id,]
+mat_top <- mat_top - rowMeans(mat_top)
+
+genes_for_heatmap <- row.names(mat_top)
+genes_for_heatmap <- data.frame(ensembl_gene_id=row.names(mat_top)) %>%
+  dplyr::left_join(id_table,
+                   by="ensembl_gene_id") %>%
+  dplyr::distinct()
+genes_for_heatmap$external_gene_name[is.na(genes_for_heatmap$external_gene_name)]  <- genes_for_heatmap$ensembl_gene_id[is.na(genes_for_heatmap$external_gene_name)]
+genes_for_heatmap$external_gene_name[which(genes_for_heatmap$external_gene_name=="")]  <- genes_for_heatmap$ensembl_gene_id[which(genes_for_heatmap$external_gene_name=="")] 
+row.names(genes_for_heatmap) <- genes_for_heatmap$ensembl_gene_id
+
+pheatmap(mat_top,
+         annotation_col=heatmap_df,
+         labels_row=genes_for_heatmap[,2],
+         show_rownames = TRUE,
          border_color = NA,
          scale="row")
 # color = inferno(10)
@@ -878,11 +1045,13 @@ matRV <- assay(rld)[select,]
 matRV <- matRV - rowMeans(matRV)
 genes_for_heatmap <- row.names(matRV)
 genes_for_heatmap <- data.frame(ensembl_gene_id=row.names(matRV)) %>%
-  dplyr::left_join(mgi_id_table,
+  dplyr::left_join(id_table,
                    by="ensembl_gene_id") %>%
   dplyr::distinct()
-genes_for_heatmap$mgi_symbol[is.na(genes_for_heatmap$mgi_symbol)]  <- genes_for_heatmap$ensembl_gene_id[is.na(genes_for_heatmap$mgi_symbol)]  
+genes_for_heatmap$external_gene_name[is.na(genes_for_heatmap$external_gene_name)]  <- genes_for_heatmap$ensembl_gene_id[is.na(genes_for_heatmap$external_gene_name)]  
+genes_for_heatmap$external_gene_name[which(genes_for_heatmap$external_gene_name=="")]  <- genes_for_heatmap$ensembl_gene_id[which(genes_for_heatmap$external_gene_name=="")] 
 row.names(genes_for_heatmap) <- genes_for_heatmap$ensembl_gene_id
+
 pheatmap(matRV,
          #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
          annotation_col=heatmap_df,
@@ -891,16 +1060,18 @@ pheatmap(matRV,
          scale = "row",
          cutree_rows = 3,
          cutree_cols = 4)
+
 #})
 ```
 
 
 # MA plots
 
-This section contains three MA plots (see [Wikipedia](https://en.wikipedia.org/wiki/MA_plot)) that compare the mean of the normalized counts against the log fold change. They show one point per feature. The points are shown in red if the feature has an adjusted p-value less than `alpha`, that is, the statistically significant features are shown in red.
+This section contains three groups of MA plots (see [Wikipedia](https://en.wikipedia.org/wiki/MA_plot)) that compare the mean of the normalized counts against the log fold change. Each of the groups has a tab for each contrast. The plots show one point per feature. The points are shown in red if the feature has an adjusted p-value less than the cutoff listed in each section, that is, the statistically significant features are shown in red.
 
 ## Filtered at `r metadata(resList[[1]])$alpha` {.tabset}
 
+This first group of plots shows `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.  
 
 ```{r 'MAplotalpha', results='asis'}
 ## MA plot with alpha used in DESeq2::results()
@@ -917,11 +1088,12 @@ cat('\n\n')
 ```
 
 
-This first plot shows uses `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.
+
 
 
 ## Filtered at `r metadata(resList[[1]])$alpha / 2` {.tabset}
 
+This second group of MA plots uses `alpha` = `r metadata(resList[[1]])$alpha / 2` and can be used against the first MA plot to identify features which have adjusted p-values between `r metadata(resList[[1]])$alpha / 2` and `r metadata(resList[[1]])$alpha`.
 
 ```{r 'MAplotalphaHalf', results='asis'}
 ## MA plot with alpha = 1/2 of the alpha used in DESeq2::results()
@@ -938,17 +1110,17 @@ cat('\n\n')
 ```
 
 
-This second MA plot uses `alpha` = `r metadata(resList[[1]])$alpha / 2` and can be used agains the first MA plot to identify which features have adjusted p-values between `r metadata(resList[[1]])$alpha / 2` and `r metadata(resList[[1]])$alpha`.
 
+## Top `r min(nBest, nrow(head(res.df, n = nBest)))` features {.tabset}
 
-## Top `r nBest` features {.tabset}
-
+The third and final set of MA plots uses an `alpha` such that the top `r min(nBest, nrow(head(res.df, n = nBest)))` features are shown in the plot.
 
 ```{r 'MAplotalpha-nBest', results='asis'}
 ## MA plot with alpha corresponding to the one that gives the nBest features
-nBest.actual <- min(nBest, nrow(head(res.df, n = nBest)))
-nBest.alpha <- head(res.df, n = nBest)$padj[nBest.actual]
+
 for (i in 1:length(resList)) {
+nBest.actual <- min(nBest, nrow(head(resList[[i]], n = nBest)))
+nBest.alpha <- head( resList[[i]][order(resList[[i]]$pvalue),], n = nBest)$padj[nBest.actual]
 contrast = gsub(pattern = "log2.*Time\ ",
                 replacement =  "",
                 x = resList[[i]]@elementMetadata[[2]][2])
@@ -958,8 +1130,6 @@ DESeq2::plotMA(resList[[i]], alpha = nBest.alpha * 1.00000000000001,
 cat('\n\n')
 }
 ```
-
-The third and final MA plot uses an alpha such that the top `r nBest.actual` features are shown in the plot. These are the features that whose details are included in the _top features_ interactive table.
 
 
 # P-values {.tabset}
@@ -974,7 +1144,6 @@ ggplot(allResults, aes(x = pvalue)) +
     labs(title='Histogram of unadjusted p-values') +
     xlab('Unadjusted p-values') +
     facet_wrap( ~ contrast, ncol = 2)
-  
 
 ```
 
@@ -1050,12 +1219,12 @@ if(!is.null(searchURL)) {
                              '" rel="noopener noreferrer" target="_blank">',
                              res.df.dt$ensembl_gene_id,
                              '<br/>',
-                             res.df.dt$mgi_symbol,
+                             res.df.dt$external_gene_name,
                              '</a>')
 }
 
 for(i in which(colnames(res.df.dt) %in% c('pvalue', 'padj'))) res.df.dt[, i] <- format(res.df.dt[, i], scientific = TRUE)
-res.df.dt <- res.df.dt[,!names(res.df.dt) %in% c("mgi_description", "mgi_symbol")]
+res.df.dt <- res.df.dt[,!names(res.df.dt) %in% c("description", "external_gene_name")]
 DT::datatable(res.df.dt,
           options = list(pagingType='full_numbers',
                          pageLength=20,
@@ -1068,7 +1237,7 @@ DT::datatable(res.df.dt,
           rownames = FALSE,
           filter = "top",
           colnames = c('Ensembl' = 'ensembl_gene_id')) %>% 
-  DT::formatRound(which(!colnames(res.df.dt) %in% c('pvalue', 'padj', 'Feature', 'contrast', 'mgi_description', 'ensembl_gene_id', 'mgi_symbol' )), digits)
+  DT::formatRound(which(!colnames(res.df.dt) %in% c('pvalue', 'padj', 'Feature', 'contrast', 'description', 'ensembl_gene_id', 'external_gene_name' )), digits)
 
 ```
 
@@ -1088,7 +1257,7 @@ plotCounts_gg <- function(i, dds, intgroup) {
       geom_point() + 
       ylab('Normalized count') +
       xlab('Group') + 
-      ggtitle(paste0(i, " ", mgi_id_table$mgi_symbol[mgi_id_table$ensembl_gene_id == i])) + 
+      ggtitle(paste0(i, " ", id_table$external_gene_name[id_table$ensembl_gene_id == i])) + 
       coord_trans(y = "log10") + 
       theme(axis.text.x = element_text(angle = 90, hjust = 1))
 }
@@ -1115,9 +1284,9 @@ allResultsOrdered_logFC_filter %>%
   top_n(numResults, wt=abs(log2FoldChange)) %>%
   ungroup() %>%
   mutate(contrast=as.factor(contrast),
-         mgi_symbol=reorder_within(mgi_symbol,log2FoldChange, contrast)) %>%
+         external_gene_name=reorder_within(external_gene_name,log2FoldChange, contrast)) %>%
   ggplot(aes(x=log2FoldChange,
-             y=mgi_symbol,
+             y=external_gene_name,
              color=contrast,
              size=-log(padj))) +
   geom_point(show.legend = TRUE) +
@@ -1159,11 +1328,37 @@ ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
 ###########################################################################################
 
 # # Create input file...
-# bmdexpress <- as.data.frame(lognorm.read.counts) # log2 normalized, size factor normalized
-# bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
-# bmdexpress <- rbind( Dose=c("Dose",as.character(DESeqDesign$Genotype_Treatment_Time)), bmdexpress, stringsAsFactors=F)
-# # bmdexpress <- rbind( Dose=c("Dose","0","1","2"), bmdexpress, stringsAsFactors=F)
-# write.table(bmdexpress, file = "bmdexpress_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+#lognorm.read.counts <- as.data.frame(counts(dds, normalized=TRUE))
+# rld normalized, size factor normalized, rounded to 4 significant figures
+bmdexpress <- as.data.frame(assay(rld))
+bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
+bmdexpress <- rbind( Dose=c("#CLASS:DOSE",as.numeric(DESeqDesign$dose)), bmdexpress, stringsAsFactors=F)
+write.table(bmdexpress, file = "bmdexpress_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+
+# chem_subset <- DESeqDesign %>% dplyr::filter(chemical %in% c("D-8","DMSO 0.1%")) %>% dplyr::select(original_names)
+# bmdexpresstest <- bmdexpress %>% dplyr::select(chem_subset$original_names)
+# bmdexpresstest <- cbind(SampleID=row.names(bmdexpresstest), bmdexpresstest, stringsAsFactors=F)
+# bmdexpresstest <- rbind(Chemical=c("#CLASS:CHEMICAL", as.data.frame(DESeqDesign %>% 
+#                                                                     dplyr::filter(chemical %in% c("D-8","DMSO 0.1%")))$chemical),
+#                                     bmdexpresstest,
+#                                     stringsAsFactors=F)
+# bmdexpresstest <- rbind( Dose=c("#CLASS:DOSE", as.data.frame(DESeqDesign %>% 
+#                                                            dplyr::filter(chemical %in% c("D-8","DMSO 0.1%")))$dose),
+#                                 bmdexpresstest,
+#                                 stringsAsFactors=F)
+# write.table(bmdexpresstest, file = "bmdexpress_test_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+
+
+
+fastbmd <- as.data.frame(assay(dds))
+fastbmd <- cbind(SampleID=row.names(fastbmd), fastbmd, stringsAsFactors=F)
+fastbmd <- rbind( Chemical=c("#CLASS:CHEMICAL",as.character(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$chemical)),
+                  fastbmd,
+                  stringsAsFactors=F)
+fastbmd <- rbind( Dose=c("#CLASS:DOSE",format(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$dose, scientific=F)),
+                  fastbmd,
+                  stringsAsFactors=F)
+write.table(fastbmd, file = "fastbmd_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
 
 ```
 
@@ -1177,6 +1372,20 @@ This section performs GO enrichment on **all DEGs passing filters**.
 
 ensemblDEGs <- significantResults$ensembl_gene_id
 head(ensemblDEGs)
+DEGs <- dplyr::left_join(data.frame(ensembl_gene_id=ensemblDEGs), id_table_entrez, by="ensembl_gene_id")
+head(DEGs)
+entrezDEGs <- as.character(DEGs$entrezgene_id)
+entrezDEGs <- entrezDEGs[!is.na(entrezDEGs)]
+
+#### DEFINE INPUTS
+myDEGs <- entrezDEGs
+# background <- row.names(assay(dds))
+background <- dplyr::left_join(data.frame(ensembl_gene_id=row.names(assay(dds))), id_table_entrez, by="ensembl_gene_id") %>%
+  dplyr::filter(!is.na(entrezgene_id)) %>%
+  dplyr::pull(entrezgene_id)
+background <- as.character(background)
+
+entrezDEGs <- entrezDEGs[!is.na(entrezDEGs)]
 
 ##### TO DO: Add multiple panels for each contrast.
 ##### Use "all" argument to only run each once..?
@@ -1184,10 +1393,13 @@ head(ensemblDEGs)
 ## Not all genes have a p-value
 table(!is.na(resList[[1]]$padj))
 
-enrich_go_all <- enrichGO(gene = ensemblDEGs,
-                         universe = row.names(assay(dds)),
-                         OrgDb = org.Mm.eg.db,
-                         keyType = "ENSEMBL",
+KeyType <- "ENTREZID" # ENSEMBL? ACCNUM? GID? ENTREZID?
+# head(keys(OrgDb.Ma, keytype="ENTREZID"))
+
+enrich_go_all <- enrichGO(gene = myDEGs,
+                         universe = background, # All genes in dataset
+                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db # OrgDb.Ma
+                         keyType = KeyType,
                          ont = "all",
                          pAdjustMethod = "BH",
                          pvalueCutoff = 0.01,
@@ -1199,28 +1411,28 @@ enrich_go_all <- enrichGO(gene = ensemblDEGs,
 #   facet_wrap(~ONTOLOGY)
 
 ## Perform enrichment analysis for Biological Process (BP)
-enrich_go_bp <- enrichGO(gene = ensemblDEGs,
-                         universe = row.names(assay(dds)),
-                         OrgDb = org.Mm.eg.db,
-                         keyType = "ENSEMBL",
+enrich_go_bp <- enrichGO(gene = myDEGs,
+                         universe = background, # All genes in dataset
+                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db
+                         keyType = KeyType,
                          ont = "BP",
                          pAdjustMethod = "BH",
                          pvalueCutoff = 0.01,
                          qvalueCutoff = 0.05)
 
-enrich_go_mf <- enrichGO(gene = ensemblDEGs,
-                         universe = row.names(assay(dds)),
-                         OrgDb = org.Mm.eg.db,
-                         keyType = "ENSEMBL",
+enrich_go_mf <- enrichGO(gene = myDEGs,
+                         universe = background, # All genes in dataset
+                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db
+                         keyType = KeyType,
                          ont = "MF",
                          pAdjustMethod = "BH",
                          pvalueCutoff = 0.01,
                          qvalueCutoff = 0.05) 
 
-enrich_go_cc <- enrichGO(gene = ensemblDEGs,
-                         universe = row.names(assay(dds)),
-                         OrgDb = org.Mm.eg.db,
-                         keyType = "ENSEMBL",
+enrich_go_cc <- enrichGO(gene = myDEGs,
+                         universe = background, # All genes in dataset
+                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db
+                         keyType = KeyType,
                          ont = "CC",
                          pAdjustMethod = "BH",
                          pvalueCutoff = 0.01,
@@ -1348,5 +1560,12 @@ session_info()
 
 Pandoc version used: `r rmarkdown::pandoc_version()`.
 
+```{r 'save_final', show=FALSE}
+# Save complete workspace
+setwd(outputdir)
+save.image(file = "Complete_analysis.RData")
+# Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
+# If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
+```
 
 <div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
