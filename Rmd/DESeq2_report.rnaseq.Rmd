@@ -57,26 +57,23 @@ message("If this text is visible by default, this report was produced to test pl
 ```
 
 ```{r setup, warning=FALSE, message=FALSE}
-#### Load Libraries
-
-## Record start time
+#### Record start time
 startTime <- Sys.time()
 
-## Set libPaths
-.libPaths(c("/home/mpiage/R/x86_64-pc-linux-gnu-library/3.6",.libPaths()))
-
-## Bioconductor
+#### Load Libraries
+library('conflicted')
+library('tidyverse')
 library('DESeq2')
 library('edgeR')
-#library('org.Ca.eg.db') # MOUSE: library('org.Mm.eg.db') # HUMAN: library('org.Hs.eg.db') # RAT: library('org.Rn.eg.db') # HAMSTER: library('org.Ca.eg.db')
 library('AnnotationHub')
-OrgDb.Ma <- query(AnnotationHub(), c("OrgDb","Mesocricetus auratus"))[[1]] # Golden Hamster
+# MOUSE: library('org.Mm.eg.db') 
+# HUMAN: library('org.Hs.eg.db')
+# RAT: library('org.Rn.eg.db')
+# GOLDEN HAMSTER: OrgDb.Ma <- query(AnnotationHub(), c("OrgDb","Mesocricetus auratus"))[[1]] # Golden Hamster
 library('enrichplot')
 library('rWikiPathways')
 library('BiocParallel')
-
-## CRAN
-library('ggplot2')                                 
+library('ggplot2')
 theme_set(theme_bw())
 library('knitr')
 library('RColorBrewer')
@@ -85,25 +82,19 @@ library('pheatmap')
 library('DT')
 library('sessioninfo')
 library('plotly')
+library('RMariaDB')
+library('clusterProfiler')
+library('biomaRt')
+library('regionReport')
+library('magrittr')
+library('vsn')
+library('lattice')
+library('pheatmap')
+library('data.table')
+library('tidytext')
+library('openxlsx')
+library('kableExtra')
 
-## Other packages
-packages <- c("RMariaDB",
-              "clusterProfiler",
-              "biomaRt",
-              "regionReport",
-              "magrittr",
-              "vsn",
-              "lattice",
-              "pheatmap",
-              "dplyr",
-              "data.table",
-              "forcats",
-              "tidytext",
-              "openxlsx",
-              "kableExtra"
-              )
-
-invisible(suppressPackageStartupMessages(lapply(packages, function(x)require(x, character.only = T, quietly = T))))
 options(java.parameters = "-Xmx10000m")
 ```
 
