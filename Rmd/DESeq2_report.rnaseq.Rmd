@@ -213,7 +213,9 @@ biospyder <- read.delim("~/dbs/biospyder/191113_Human_S1500_Surrogate_2.0_Manife
                           sep="\t",
                           header=TRUE,
                           quote="\"")
-sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,]
+# biospyder %>% select(ENSEMBL_GENE_ID) %>% distinct() %>% count()
+biospyder_annos <- biospyder %>% select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL)
+# sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,] # If aligned to hg38...
 }
 
 head(rownames(DESeqDesign))
@@ -504,10 +506,14 @@ for (i in 1:length(resList)) {
   }
 }
 # Write dataframe of all results
+# Significant only
 sigtabList <- sigtabList[!sapply(sigtabList, is.null)]
-significantResults <- do.call(rbind, sigtabList)
+significantResults <- rbindlist(sigtabList)
 significantResults <- dplyr::distinct(significantResults)
-allResults <- do.call(rbind, alltablList)
+# All results including non-significant
+allResults <- rbindlist(alltablList)
+
+
 
 # All Results for Plotting
 # Replace NA gene symbols with ensembl ID
