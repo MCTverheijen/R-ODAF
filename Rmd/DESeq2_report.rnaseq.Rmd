@@ -9,7 +9,12 @@ output:
     number_sections: true
     code_folding: hide
     theme: spacelab # flatly spacelab sandstone cerulean
-knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(dirname(inputFile), paste0("RNASeq_analysis_",format(Sys.time(), '%d-%m-%Y.%H.%M'),".html"))) })
+params:
+  species: rat # pick from human, mouse, rat, hamster
+  design: "group" # a single experimental group of interest
+  intgroup: "group" # experimental group of interest plus covariates; can be more than one
+  flag: TRUE
+  projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash... we try to avoid requiring it though!
 ---
 
 ***
@@ -21,31 +26,45 @@ knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = e
 *Current version: 1*  
 Date report generated: `r format(Sys.time(), '%d %B, %Y')`  
 Report prepared for: Name  
-Purpose of report:
+Purpose of report:  
 
-* Exercise to analyze RNA-Seq data
+* Exercise to analyze RNA-Seq data  
 
 **Previous revisions**  
 
-N/A
-
+N/A  
 
 ***
 
 # Code setup, Data Loading, and DESeq2 Code
 
-This report is meant to help explore DESeq2 results and was generated using RMarkdown. This section contains the code for setting up the rest of the report.
+This report is meant to help explore DESeq2 results and was generated using RMarkdown. This section contains the code for setting up the rest of the report.  
 
 ## Load libraries
 
 ```{r docSetup, warning=FALSE, message=FALSE}
+## Define paths
+paths <- list()
+paths$root <- params$projectdir
+paths$data <- paste0(paths$root, "/data")
+paths$raw <- paste0(paths$data, "/raw")
+paths$output <- paste0(paths$data, "/output")
+paths$processed <- paste0(paths$data, "/processed")
+paths$metadata <- paste0(paths$root, "/metadata")
+paths$reports <- paste0(paths$root, "/reports")
+paths$DEG_output <- paste0(paths$root, "/DEG_output")
+
 ## knitrBoostrap and device chunk options
-library('knitr')
 # Set so that long lines in R will be wrapped:
-opts_chunk$set(bootstrap.show.code = FALSE, bootstrap.panel = TRUE, cache = TRUE) # tidy.opts=list(width.cutoff=60), tidy=TRUE, crop = NULL
+knitr::opts_chunk$set(bootstrap.show.code = FALSE,
+                      bootstrap.panel = TRUE,
+                      cache = TRUE)
+#knitr::tidy.opts=list(width.cutoff=60), tidy=TRUE, crop = NULL # Use for PDFs
+knitr::opts_knit$set(root.dir = paths$root)
+
 # Set this variable to FALSE if you only want to run the plotting functions by reloading the last RData file.
-flag=TRUE # To eveluate analysis chunks
-if (flag==FALSE) { load("Partial_analysis.RData") }
+flag=params$flag # To evaluate analysis chunks
+if (flag==FALSE) { load(paste0(params$projectdir,"Partial_analysis.RData")) }
 # Set this variable to TRUE if you would like to embed the files directly into the HTML for portability. This slows down page responsiveness drastically, since the files are generally quite large.
 embedFiles=FALSE
 # Se this variable to be TRUE if you want to have separate plots of top genes as defined in the R-ODAF template
@@ -61,41 +80,86 @@ message("If this text is visible by default, this report was produced to test pl
 startTime <- Sys.time()
 
 #### Load Libraries
-library('conflicted')
+# General purpose
+# library('conflicted')
+library('knitr')
+library('kableExtra')
 library('tidyverse')
+library('magrittr')
+library('ggplot2')
+library('DT')
+library('data.table')
+library('pheatmap')
+library('lattice')
+library('tidytext')
+library('openxlsx')
+library('RColorBrewer')
+library('viridis')
+library('sessioninfo')
+library('plotly')
+#library('RMariaDB')
+
+# Bioinformatics-specific
 library('DESeq2')
 library('edgeR')
-library('AnnotationHub')
-# MOUSE: library('org.Mm.eg.db') 
-# HUMAN: library('org.Hs.eg.db')
-# RAT: library('org.Rn.eg.db')
-# GOLDEN HAMSTER: OrgDb.Ma <- query(AnnotationHub(), c("OrgDb","Mesocricetus auratus"))[[1]] # Golden Hamster
 library('enrichplot')
 library('rWikiPathways')
 library('BiocParallel')
-library('ggplot2')
-theme_set(theme_bw())
-library('knitr')
-library('RColorBrewer')
-library('viridis')
-library('pheatmap')
-library('DT')
-library('sessioninfo')
-library('plotly')
-library('RMariaDB')
 library('clusterProfiler')
 library('biomaRt')
-library('regionReport')
-library('magrittr')
-library('vsn')
-library('lattice')
-library('pheatmap')
-library('data.table')
-library('tidytext')
-library('openxlsx')
-library('kableExtra')
+library('AnnotationHub')
 
+# Not needed?
+#library('regionReport')
+#library('vsn')
+
+# Load genome, depends on species
+# To add: Zebrafish, Folsomia candida, others?
+species <- params$species
+if(species=="human"){
+  # Human:
+  library('org.Hs.eg.db')
+  orgdb <- "org.Hs.eg.db"
+  species_sci <- "Homo sapiens"
+  ensembl_species <- "hsapiens_gene_ensembl"
+  species_gene_symbol <- "external_gene_name"
+} else {
+    if(species=="mouse"){
+      # Mouse:
+      library('org.Mm.eg.db')
+      orgdb <- "org.Mm.eg.db"
+      species_sci <- "Mus musculus"
+      ensembl_species <- "mmusculus_gene_ensembl"
+      species_gene_symbol <- "mgi_symbol" 
+    }
+  else {
+    if(species=="rat"){
+      # Rat: 
+      library('org.Rn.eg.db')
+      orgdb <- "org.Rn.eg.db"
+      species_sci <- "Rattus norvegicus"
+      ensembl_species <- "rnorvegicus_gene_ensembl"
+      species_gene_symbol <- "mgi_symbol"
+    }
+  else {
+    if(species=="hamster"){
+      # Golden hamster:
+      OrgDb.Ma <- query(AnnotationHub(), c("OrgDb","Mesocricetus auratus"))[[1]]
+      orgdb <- "OrgDb.Ma"
+      species_sci <- "Mesocricetus auratus"
+      ensembl_species <- "mauratus_gene_ensembl"
+      species_gene_symbol <- "external_gene_name"
+    }
+  else {
+    message("No species picked!")
+  }
+  }
+  }
+}
+
+# Options
 options(java.parameters = "-Xmx10000m")
+theme_set(theme_bw())
 ```
 
 The code above (not shown by default) loads the relevant R packages required for analysis.
@@ -106,31 +170,42 @@ The code above (not shown by default) loads the relevant R packages required for
 ###################################################################################
 ###################################################################################
 # PARAMETERS TO SET MANUALLY                            		 
+#
+# Set file locations
+if(!dir.exists(paths$DEG_output)){
+  dir.create(paths$DEG_output)
+  }
 
-# Set file locations				
-	sampledir <- "/home/mpiage/data/2020_TRF_Reza_flame_retardants/"
-  setwd(sampledir)
-	outputdir <- paste(sampledir, "./DEG_output/", sep="")
-	if(!dir.exists(outputdir)) {dir.create(outputdir)}
-# Names of files to load
-	SampleDataFile <- "genes.data.tsv" #This tab delimited file contains the merged RSEM.genes.results files
-	SampleKeyFile <- "metadata.txt" #This tab delimited file contains at least 2 columns: NAME (sample names identical to the column names of sampleData) and Compound (needs to identify to which group the sample belongs -> ExperimentalGroup & ControlGroup)
-	ContrastsFile <- "contrasts.txt" #This tab delimited file contains one row per contrast, with the control for comparison in the right column and the comparison in the left column
+# FILES TO LOAD
+# A. Tab delimited file with merged RSEM.genes.results files:
+SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
+# B. Tab delimited sample information file with at least 2 columns:
+  # 1. sample names identical to the column names of sampleData
+  # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
+SampleKeyFile <- file.path(paths$metadata,"metadata.txt")
+# C. Tab delimited file of comparisons (contrasts) to test 
+# Group of interest in the left column, control for comparison in the right column
+ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
+
 # Specify which groups need to be compared 
-	contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="\t", header=FALSE,  quote="\"")
-	short_contrast_names <- paste(contrasts$V1,"v.",contrasts$V2) # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
-	intgroup <- DESIGN <- "group"	#Column name which defines the groups to be compared
-  nBestFeatures <- 20 # The number of best features to make plots of their counts
-  nBest <- 100 # Number of features to include in table and limiting PCA/clustering analysis
-  nHeatmap <- 50 # Number of most variable genes for heatmap
-  nHeatmapDEGs <- 50 # Number of DEGs for heatmap
+contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="\t", header=FALSE,  quote="\"")
+short_contrast_names <- paste(contrasts$V1,"v.",contrasts$V2) # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
+DESIGN <- params$design	# Column name which defines the groups to be compared
+intgroup <- params$intgroup # "Interesting groups" - an experimental group and/or covariates
+
+# Various plotting and display options
+nBestFeatures <- 20 # The number of best features to make plots of their counts
+nBest <- 100 # Number of features to include in table and limiting PCA/clustering analysis
+nHeatmap <- 50 # Number of most variable genes for heatmap
+nHeatmapDEGs <- 50 # Number of DEGs for heatmap
+
 # Set analysis ID. This ID will be used as prefix for the output files
-	analysisID <-"2020_"
+analysisID <-"2020_DEFAULT"
 # Specify used platform/technology for data generation:
-	Platform <- "RNA-Seq" # Specify "RNA-Seq" or "TempO-seq"
+Platform <- "RNA-Seq" # Specify "RNA-Seq" or "TempO-seq"
 
 # Misc parameters
-	digits = 2 # For rounding numbers
+digits = 2 # For rounding numbers
 ```
 
 The code above (not shown by default) specifies user preferences and data locations.
@@ -141,7 +216,6 @@ The experimental comparisons of interest are as follows: `r short_contrast_names
 
 ```{r 'load_data', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
 # Load input files 
-setwd(sampledir)
 sampleData <- read.delim(SampleDataFile,
                          sep="\t",
                          stringsAsFactors=FALSE,
@@ -149,20 +223,20 @@ sampleData <- read.delim(SampleDataFile,
                          quote="\"",
                          row.names=1,
                          check.names=FALSE)
+
 DESeqDesign <- read.delim(SampleKeyFile,
                           stringsAsFactors=FALSE,
                           sep="\t",
                           header=TRUE,
                           quote="\"",
-                          row.names="name") # Pick column that is used in ID
+                          row.names=1) # Pick column that is used in ID; might be more appropriate to change this!
 
-NORM_TYPE<-paste0(analysisID, "_DESeq2_", Platform)
+NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 
-plotdir <- paste(outputdir, "/plots/", sep="")
+plotdir <- paste(paths$DEG_output, "/plots/", sep="")
 if(!dir.exists(plotdir)) {dir.create(plotdir)}
-barplot.dir<- paste(plotdir, "/barplot_genes/", sep="")
+barplot.dir <- paste(plotdir, "/barplot_genes/", sep="")
 if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
-
 
 ```
 
@@ -187,15 +261,17 @@ filteredSampleDataCount <- ncol(sampleData)
 
 samples_before <- nrow(DESeqDesign)
 DESeqDesign$original_names <- rownames(DESeqDesign)
-metadata_in_sampledata <- all(rownames(DESeqDesign) %in% colnames(sampleData)) # Sanity check: each sample name (row) in the metadata should have a corresponding column in the count data
-sampledata_in_metadata <- all(colnames(sampleData) %in% rownames(DESeqDesign)) # Sanity check: each sample name (row) in the metadata should have a corresponding column in the count data
+
+# Sanity check: each sample (row) in the metadata should have a corresponding column in the count data
+metadata_in_sampledata <- all(rownames(DESeqDesign) %in% colnames(sampleData))
+# Sanity check: each column in the count data should have a corresponding sample (row) in the metadata
+sampledata_in_metadata <- all(colnames(sampleData) %in% rownames(DESeqDesign)) 
 removed <- colnames(sampleData[which(!colnames(sampleData) %in% rownames(DESeqDesign))])
 DESeqDesign <- DESeqDesign[(colnames(sampleData)),] # Reorder the metadata table to correspond to the order of columns in the count data
 DESeqDesign <- na.omit(DESeqDesign)
-DESeqDesign <- DESeqDesign[ DESeqDesign$treatment != "human reference RNA",] # Remove samples manually
+# DESeqDesign <- DESeqDesign[ DESeqDesign$treatment != "human reference RNA",] # Remove samples manually
 sampleData <- sampleData[,(rownames(DESeqDesign))]
 samples_after <- nrow(DESeqDesign)
-
 
 # For TempO-Seq: Limit sampleData matrix to genes in the assay.
 if (Platform=="TempO-Seq") {
@@ -211,11 +287,10 @@ biospyder_annos <- biospyder %>% select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL
 
 head(rownames(DESeqDesign))
 head(colnames(sampleData)) # Output should match
-
-setwd(outputdir)
-if (file.exists("dds.Rdata")) {
+intgroups <- params$intgroup
+if (file.exists(file.path(paths$DEG_output, "dds.Rdata"))) {
   print(paste("Already found DESeq2 object from previous run; loading from disk."))
-  load("./dds.Rdata")
+  load(file.path(paths$DEG_output,"/dds.Rdata"))
   if (!identical(as.data.frame(round(counts(dds))),
                  round(sampleData),0)) {
     print("Not identical")
@@ -223,11 +298,11 @@ if (file.exists("dds.Rdata")) {
   } else {
   dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
                                 colData = as.data.frame(DESeqDesign),
-                                design = ~group )
-  dds <- dds[, rownames(DESeqDesign)]
+                                design = formula(paste("~",intgroups)) )
+  dds <- dds[,rownames(DESeqDesign)]
   dds <- dds[rowSums(counts(dds)) > 1]
   dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(39))
-  save(dds, file="./dds.Rdata")
+  save(dds, file=file.path(paths$DEG_output,"dds.Rdata"))
   }
 
 # ### REMOVE if done above from scratch
@@ -276,7 +351,7 @@ Following the removal of other samples (i.e., reference RNA, etc.), there were `
 This table shows the final list of samples that were used in the data analysis (as well as corresponding sample information as it was communicated to the Genomics Laboratory).  
 
 ```{r print_metadata}
-knitr::kable(DESeqDesign,
+knitr::kable(DESeqDesign %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="User-provided information about samples and experimental conditions") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
@@ -392,7 +467,7 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	                 res=res,
 	                 type="ashr")
 	#Make new directory for the ODAF-specific files
-	ODAFdir <- paste(outputdir, "/R-ODAF/", sep="")
+	ODAFdir <- file.path(paths$DEG_output, "R-ODAF")
 	if(!dir.exists(ODAFdir)) {dir.create(ODAFdir)}
 	setwd(ODAFdir)
 	FileName <- paste(NORM_TYPE, condition2,"vs",condition1, "FDR", pAdjValue, sep="_")		
@@ -411,22 +486,22 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	if (R_ODAF_plots==TRUE) {
   	print("creating Read count Plots")
   	# top DEGs
-  	plotdir<- paste(outputdir, "/plots/", sep="")
+  	plotdir <- file.path(paths$DEG_output, "plots")
   	if(!dir.exists(plotdir)) {dir.create(plotdir)}
-  	barplot.dir<- paste(plotdir, "/barplot_genes/", sep="")
+  	barplot.dir <- file.path(paths$DEG_output, "plots", "/barplot_genes/")
   	if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
   
-  	TOPbarplot.dir<- paste(barplot.dir, "Top_DEGs/", sep="")
+  	TOPbarplot.dir <- file.path(barplot.dir, "Top_DEGs")
   	if(!dir.exists(TOPbarplot.dir)) {dir.create(TOPbarplot.dir)}
   	setwd(TOPbarplot.dir)
-  	draw.barplots(DEsamples, "top", 20) #(DEsamples, top_bottom, NUM)
+  	draw.barplots(DEsamples, "top", 20) # (DEsamples, top_bottom, NUM)
   	print("Top 20 DEG plots done")
   
   	# Spurious spikes
-  	SPIKEbarplot.dir<- paste(barplot.dir, "DE_Spurious_spikes/", sep="")
+  	SPIKEbarplot.dir <- file.path(barplot.dir, "DE_Spurious_spikes")
   	if(!dir.exists(SPIKEbarplot.dir)) {dir.create(SPIKEbarplot.dir)}
   	setwd(SPIKEbarplot.dir)
-  	draw.barplots(DEspikes, "top", nrow(DEspikes)) #(DEsamples, top_bottom, NUM)
+  	draw.barplots(DEspikes, "top", nrow(DEspikes)) # (DEsamples, top_bottom, NUM)
   	print("All DE_Spurious_spike plots done")
 	}
 }
@@ -443,14 +518,14 @@ The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`.
 #listEnsembl()
 #listMarts()
 #listDatasets(useMart('ensembl'))
-ensembl <- useMart("ensembl", dataset = "mauratus_gene_ensembl",  host = "useast.ensembl.org") #  Mouse: "mmusculus_gene_ensembl" # Human: "hsapiens_gene_ensembl" # Golden hamster: mauratus_gene_ensembl # Rat: rnorvegicus_gene_ensembl
+ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "useast.ensembl.org")
 #listAttributes(ensembl)
 #listFilters(ensembl)
 
 genes <- row.names(resList[[1]])
 
 #genes_all <- unique(row.names(assay(dds)))
-setwd(outputdir)
+setwd(paths$DEG_output) # Should avoid this... change ASAP
 if (file.exists("id_table.Rdata")) {
   print(paste("Already found ID table; skipping biomaRt query and loading from disk."))
   load("./id_table.Rdata")
@@ -606,7 +681,7 @@ kable(degTable,
 #######################################
 ### Write results table from DESeq2
 #######################################
-setwd(outputdir)
+setwd(paths$DEG_output)
 write.table(allResults,         file=paste0(NORM_TYPE,"-DESeq_output_ALL.txt"),               quote=F, sep='\t', col.names=NA)
 write.table(significantResults, file=paste0(NORM_TYPE,"-DESeq_output_significant.txt"),       quote=F, sep='\t', col.names=NA)
 write.table(summaryTable,       file=paste0(NORM_TYPE,"-DESeq_output_all_genes.txt"),         quote=F, sep='\t', col.names=NA)
@@ -619,7 +694,7 @@ The code above (not shown by default) writes text files for each DEG summary typ
 # Write data
 
 ```{r 'write-excel-worksheets', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
-setwd(outputdir)
+setwd(paths$DEG_output)
 #######################################
 ### Write results above but in Excel
 #######################################
@@ -711,7 +786,7 @@ modifyBaseFont(wb3, fontSize = 10, fontName = "Arial Narrow")
 
 short_contrast_names <- stringr::str_trunc(short_contrast_names, 30, side="center")
 
-for (i in 1:length(levels(allResults$contrast))) {
+for (i in 1:length(levels(factor(allResults$contrast)))) {
   print(i)
   dataToWrite <- allResults[allResults$contrast==levels(allResults$contrast)[i],]
   addWorksheet(wb3, short_contrast_names[i])
@@ -753,23 +828,23 @@ The code above (not shown by default) writes Excel workbooks and text files of D
 These files should be provided to you as a separate zip file.
 
 ```{r 'embed_excel_files', eval=embedFiles}
-setwd(outputdir)
+setwd(paths$DEG_output)
 xfun::embed_files(list.files(".", "[.](xlsx)$"), name = "RNASeq_Spreadsheets.zip")
 ```
 
 ```{r 'embed_text_files', eval=embedFiles}
-setwd(outputdir)
+setwd(paths$DEG_output)
 xfun::embed_files(list.files(".", "[.](txt)$"), name = "RNASeq_Text_Files.zip")
 ```
 
 ```{r 'embed_ODAF_files', eval=embedFiles}
-setwd(outputdir)
+setwd(paths$DEG_output)
 xfun::embed_dir(ODAFdir, name = "RNASeq_R-ODAF_text_files.zip")
 ```
 
 ```{r 'save_point', show=FALSE, eval=flag}
 # Save RData here if flag is TRUE.
-setwd(outputdir)
+setwd(paths$DEG_output)
 save.image(file = "Partial_analysis.RData")
 # Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
 # If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
@@ -781,13 +856,13 @@ save.image(file = "Partial_analysis.RData")
 
 ```{r 'PCA'}
 ## Perform PCA analysis and make plot
-plotPCA(rld, intgroup = intgroup, ntop=nrow(assay(rld)))
+plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)))
 ## Get percent of variance explained
-data_pca <- plotPCA(rld, intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld)), returnData = TRUE)
+data_pca <- plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)), returnData = TRUE)
 percentVar <- round(100 * attr(data_pca, "percentVar"))
 
 # PCAplot <- plotPCA(rld, intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld)), returnData = TRUE)
-# ggplot(PCAplot, aes(PC1, PC2, color=dose)) + 
+# ggplot(PCAplot, aes(PC1, PC2, color=dose)) +
 #   geom_point(size=1) +
 #   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
 #   ylab(paste0("PC2: ",percentVar[2],"% variance")) +
@@ -803,8 +878,8 @@ This plot shows the first two principal components that explain the variability 
 ```{r 'PCA_DEGs'}
 rld_degs <- rld[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
 ## Perform PCA analysis and make plot
-plotPCA(rld_degs, intgroup = c("dose","group","treatment"), ntop=nrow(rld_degs)) #+ theme(legend.position = "none")
-PCAplotDEGs <- plotPCA(rld_degs, intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld_degs)), returnData = TRUE)
+plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs)) #+ theme(legend.position = "none")
+PCAplotDEGs <- plotPCA(rld_degs, params$intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld_degs)), returnData = TRUE)
 
 # ggplot(PCAplotDEGs, aes(PC1, PC2, color=dose)) + 
 #   geom_point(size=1) +
@@ -814,7 +889,7 @@ PCAplotDEGs <- plotPCA(rld_degs, intgroup = c("dose","group","treatment"), ntop=
 #   coord_fixed()
 
 ## Get percent of variance explained
-data_pcaDEGs <- plotPCA(rld_degs, intgroup = intgroup, returnData = TRUE, ntop=nrow(rld_degs))
+data_pcaDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, returnData = TRUE, ntop=nrow(rld_degs))
 percentVarDEGs <- round(100 * attr(data_pcaDEGs, "percentVar"))
 ```
 
@@ -831,10 +906,10 @@ select = order(rv, decreasing = TRUE)[1:nBest]
 rld_top <- rld[select,]
 
 ## Perform PCA analysis and make plot
-plotPCA(rld_top, intgroup = intgroup, ntop=nrow(rld_top))
+plotPCA(rld_top, intgroup = params$intgroup, ntop=nrow(rld_top))
 
 ## Get percent of variance explained
-data_pcaTop <- plotPCA(rld_top, intgroup = intgroup, returnData = TRUE, ntop=nrow(rld_top))
+data_pcaTop <- plotPCA(rld_top, intgroup = params$intgroup, returnData = TRUE, ntop=nrow(rld_top))
 percentVarTop <- round(100 * attr(data_pcaTop, "percentVar"))
 ```
 
@@ -849,7 +924,7 @@ This plot shows the principal components analysis limited to all DEGs. In this c
 sampleDists <- dist(t(assay(rld)))
 sampleDistMatrix <- as.matrix(sampleDists)
 ## Add names based on intgroup
-rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, intgroup]), 1,
+rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, params$design]), 1,
     paste, collapse = ' : ')
 colnames(sampleDistMatrix) <- NULL
 
@@ -877,7 +952,7 @@ sampleDistsDEGs <- dist(t(assay(rld_degs)))
 sampleDistMatrixDEGs <- as.matrix(sampleDistsDEGs)
 
 ## Add names based on intgroup
-rownames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, intgroup]), 1,
+rownames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, params$design]), 1,
     paste, collapse = ' : ')
 colnames(sampleDistMatrixDEGs) <- NULL
 
@@ -903,7 +978,7 @@ sampleDistsTop <- dist(t(assay(rld)[select,]))
 sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 
 ## Add names based on intgroup
-rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, intgroup]), 1,
+rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, params$intgroup]), 1,
     paste, collapse = ' : ')
 colnames(sampleDistMatrixTop) <- NULL
 
@@ -1248,7 +1323,7 @@ This section contains plots showing the normalized counts per sample for each gr
 plotCounts_gg <- function(i, dds, intgroup) {
     data <- plotCounts(dds,
                        gene=i,
-                       intgroup=intgroup,
+                       intgroup=params$intgroup,
                        returnData = TRUE)
     ggplot(data, aes(x = data[,2], y = data[,1])) + 
       geom_point() + 
@@ -1262,7 +1337,7 @@ plotCounts_gg <- function(i, dds, intgroup) {
 genesToPlot <- significantResults %>% arrange(-abs(log2FoldChange))
 
 for(i in head(unique(genesToPlot$ensembl_gene_id), nBestFeatures)) {
-    print(plotCounts_gg(i, dds = dds, intgroup = intgroup))
+    print(plotCounts_gg(i, dds = dds, intgroup = params$intgroup))
 }
 
 ```
@@ -1391,11 +1466,11 @@ entrezDEGs <- entrezDEGs[!is.na(entrezDEGs)]
 table(!is.na(resList[[1]]$padj))
 
 KeyType <- "ENTREZID" # ENSEMBL? ACCNUM? GID? ENTREZID?
-# head(keys(OrgDb.Ma, keytype="ENTREZID"))
+# head(keys(orgdb, keytype="ENTREZID"))
 
 enrich_go_all <- enrichGO(gene = myDEGs,
                          universe = background, # All genes in dataset
-                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db # OrgDb.Ma
+                         OrgDb = orgdb,
                          keyType = KeyType,
                          ont = "all",
                          pAdjustMethod = "BH",
@@ -1410,7 +1485,7 @@ enrich_go_all <- enrichGO(gene = myDEGs,
 ## Perform enrichment analysis for Biological Process (BP)
 enrich_go_bp <- enrichGO(gene = myDEGs,
                          universe = background, # All genes in dataset
-                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db
+                         OrgDb = orgdb,
                          keyType = KeyType,
                          ont = "BP",
                          pAdjustMethod = "BH",
@@ -1419,7 +1494,7 @@ enrich_go_bp <- enrichGO(gene = myDEGs,
 
 enrich_go_mf <- enrichGO(gene = myDEGs,
                          universe = background, # All genes in dataset
-                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db
+                         OrgDb = orgdb,
                          keyType = KeyType,
                          ont = "MF",
                          pAdjustMethod = "BH",
@@ -1428,7 +1503,7 @@ enrich_go_mf <- enrichGO(gene = myDEGs,
 
 enrich_go_cc <- enrichGO(gene = myDEGs,
                          universe = background, # All genes in dataset
-                         OrgDb = OrgDb.Ma, # org.Mm.eg.db # org.Hs.eg.db # org.Rn.eg.db
+                         OrgDb = orgdb,
                          keyType = KeyType,
                          ont = "CC",
                          pAdjustMethod = "BH",
@@ -1468,13 +1543,13 @@ clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
 
 ```{r 'pathway_analysis', collapse=TRUE}
 
-entrez_IDs <- as.character(mgi_id_table_entrez$entrezgene_id)
+entrez_IDs <- as.character(id_table_entrez$entrezgene_id)
 entrezDEGs <- dplyr::left_join(significantResults,
-                               mgi_id_table_entrez,
+                               id_table_entrez,
                                by="ensembl_gene_id")
 entrezDEGs <- as.vector(entrezDEGs$entrezgene_id)
 
-mouseWiki <- rWikiPathways::downloadPathwayArchive(organism="Mus musculus", format = "gmt")
+mouseWiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt")
 wp2gene <- clusterProfiler::read.gmt(mouseWiki)
 wp2gene <- wp2gene %>% tidyr::separate(ont, c("name","version","wpid","org"), "%")
 wpid2gene <- wp2gene %>% dplyr::select(wpid,gene) #TERM2GENE
@@ -1489,7 +1564,7 @@ DEG_pathways <- clusterProfiler::enricher(
         pvalueCutoff = 0.05, #p.adjust cutoff
         TERM2GENE = wpid2gene,
         TERM2NAME = wpid2name)
-DEG_pathways <- DOSE::setReadable(DEG_pathways, org.Mm.eg.db, keyType = "ENTREZID")
+DEG_pathways <- DOSE::setReadable(DEG_pathways, orgdb, keyType = "ENTREZID")
 
 clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
   theme(axis.text.y = element_text(angle = 0)) +
@@ -1498,12 +1573,11 @@ clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
 
 ## By contrast {.tabset}
 
-
 ```{r 'pathway_analysis_by_contrast_make_plots', collapse=TRUE}
 plotList <- list()
 for (i in 1:length(levels(significantResults$contrast))) {
   entrezDEGs <- dplyr::left_join(significantResults[significantResults$contrast==levels(significantResults$contrast)[i],],
-                                 mgi_id_table_entrez,
+                                 id_table_entrez,
                                  by="ensembl_gene_id")
   entrezDEGs <- entrezDEGs$entrezgene_id
   DEG_pathways <- clusterProfiler::enricher(
@@ -1513,7 +1587,7 @@ for (i in 1:length(levels(significantResults$contrast))) {
           pvalueCutoff = 0.05, #p.adjust cutoff
           TERM2GENE = wpid2gene,
           TERM2NAME = wpid2name)
-  DEG_pathways <- DOSE::setReadable(DEG_pathways, org.Mm.eg.db, keyType = "ENTREZID")
+  DEG_pathways <- DOSE::setReadable(DEG_pathways, orgdb, keyType = "ENTREZID")
   plotList[[i]] <- clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
      theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
@@ -1559,7 +1633,7 @@ Pandoc version used: `r rmarkdown::pandoc_version()`.
 
 ```{r 'save_final', show=FALSE}
 # Save complete workspace
-setwd(outputdir)
+setwd(paths$DEG_output)
 save.image(file = "Complete_analysis.RData")
 # Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
 # If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
