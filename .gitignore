@@ -50,4 +50,5 @@ vignettes/*.pdf
 *sam
 *results
 /DEG_output*
+/reports
 paths.txt

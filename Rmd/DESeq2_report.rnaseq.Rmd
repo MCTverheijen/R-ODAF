@@ -15,6 +15,7 @@ params:
   intgroup: "group" # experimental group of interest plus covariates; can be more than one
   flag: TRUE
   projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash... we try to avoid requiring it though!
+  platform: "RNA-Seq"
 ---
 
 ***
@@ -202,7 +203,7 @@ nHeatmapDEGs <- 50 # Number of DEGs for heatmap
 # Set analysis ID. This ID will be used as prefix for the output files
 analysisID <-"2020_DEFAULT"
 # Specify used platform/technology for data generation:
-Platform <- "RNA-Seq" # Specify "RNA-Seq" or "TempO-seq"
+Platform <- params$platform # Should be one of "RNA-Seq" or "TempO-seq"
 
 # Misc parameters
 digits = 2 # For rounding numbers
@@ -576,6 +577,7 @@ for (i in 1:length(resList)) {
 sigtabList <- sigtabList[!sapply(sigtabList, is.null)]
 significantResults <- rbindlist(sigtabList)
 significantResults <- dplyr::distinct(significantResults)
+significantResults$contrast <- factor(significantResults$contrast)
 # All results including non-significant
 allResults <- rbindlist(alltablList)
 
@@ -879,7 +881,7 @@ This plot shows the first two principal components that explain the variability 
 rld_degs <- rld[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
 ## Perform PCA analysis and make plot
 plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs)) #+ theme(legend.position = "none")
-PCAplotDEGs <- plotPCA(rld_degs, params$intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld_degs)), returnData = TRUE)
+PCAplotDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(assay(rld_degs)), returnData = TRUE)
 
 # ggplot(PCAplotDEGs, aes(PC1, PC2, color=dose)) + 
 #   geom_point(size=1) +
@@ -1016,7 +1018,8 @@ mat <- mat - rowMeans(mat)
 #          scale="row",
 #          breaks = mat_breaks)
 
-heatmap_df <- as.data.frame(colData(rld)[,c("dose","group","treatment")]) # Customize!
+heatmap_df <- as.data.frame(colData(rld)[,params$intgroup])
+row.names(heatmap_df) <- colData(rld)$original_names # Customize!
 pheatmap(mat,
          annotation_col=heatmap_df,
          show_rownames = FALSE,
@@ -1160,9 +1163,6 @@ cat('\n\n')
 ```
 
 
-
-
-
 ## Filtered at `r metadata(resList[[1]])$alpha / 2` {.tabset}
 
 This second group of MA plots uses `alpha` = `r metadata(resList[[1]])$alpha / 2` and can be used against the first MA plot to identify features which have adjusted p-values between `r metadata(resList[[1]])$alpha / 2` and `r metadata(resList[[1]])$alpha`.
@@ -1180,7 +1180,6 @@ cat('\n\n')
 }
 
 ```
-
 
 
 ## Top `r min(nBest, nrow(head(res.df, n = nBest)))` features {.tabset}
@@ -1202,7 +1201,6 @@ DESeq2::plotMA(resList[[i]], alpha = nBest.alpha * 1.00000000000001,
 cat('\n\n')
 }
 ```
-
 
 # P-values {.tabset}
 
@@ -1295,21 +1293,35 @@ if(!is.null(searchURL)) {
                              '</a>')
 }
 
-for(i in which(colnames(res.df.dt) %in% c('pvalue', 'padj'))) res.df.dt[, i] <- format(res.df.dt[, i], scientific = TRUE)
-res.df.dt <- res.df.dt[,!names(res.df.dt) %in% c("description", "external_gene_name")]
+res.df.dt[, 'padj'] <- format(res.df.dt[, 'padj'], scientific = TRUE, digits=digits)
+res.df.dt[, 'pvalue'] <- format(res.df.dt[, 'pvalue'], scientific = TRUE, digits=digits)
+res.df.dt <- res.df.dt %>% dplyr::select(-c(description, external_gene_name))
+
 DT::datatable(res.df.dt,
           options = list(pagingType='full_numbers',
                          pageLength=20,
                          scrollX='100%',
                          dom = 'Bfrtip',
-                         buttons = c('copy', 'csv', 'excel', 'pdf', 'print', 'colvis'),
+                         buttons = c('copy',
+                                     'csv',
+                                     'excel',
+                                     'pdf',
+                                     'print',
+                                     'colvis'),
                          columnDefs = list(list(visible=FALSE, targets=c(2,4,5)))),
           escape = FALSE,
           extensions = 'Buttons',
           rownames = FALSE,
           filter = "top",
           colnames = c('Ensembl' = 'ensembl_gene_id')) %>% 
-  DT::formatRound(which(!colnames(res.df.dt) %in% c('pvalue', 'padj', 'Feature', 'contrast', 'description', 'ensembl_gene_id', 'external_gene_name' )), digits)
+  DT::formatRound(which(!colnames(res.df.dt) %in% c('pvalue',
+                                                    'padj',
+                                                    'Feature',
+                                                    'contrast',
+                                                    'description',
+                                                    'ensembl_gene_id',
+                                                    'external_gene_name')),
+                  digits)
 
 ```
 
@@ -1406,21 +1418,6 @@ bmdexpress <- as.data.frame(assay(rld))
 bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
 bmdexpress <- rbind( Dose=c("#CLASS:DOSE",as.numeric(DESeqDesign$dose)), bmdexpress, stringsAsFactors=F)
 write.table(bmdexpress, file = "bmdexpress_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
-
-# chem_subset <- DESeqDesign %>% dplyr::filter(chemical %in% c("D-8","DMSO 0.1%")) %>% dplyr::select(original_names)
-# bmdexpresstest <- bmdexpress %>% dplyr::select(chem_subset$original_names)
-# bmdexpresstest <- cbind(SampleID=row.names(bmdexpresstest), bmdexpresstest, stringsAsFactors=F)
-# bmdexpresstest <- rbind(Chemical=c("#CLASS:CHEMICAL", as.data.frame(DESeqDesign %>% 
-#                                                                     dplyr::filter(chemical %in% c("D-8","DMSO 0.1%")))$chemical),
-#                                     bmdexpresstest,
-#                                     stringsAsFactors=F)
-# bmdexpresstest <- rbind( Dose=c("#CLASS:DOSE", as.data.frame(DESeqDesign %>% 
-#                                                            dplyr::filter(chemical %in% c("D-8","DMSO 0.1%")))$dose),
-#                                 bmdexpresstest,
-#                                 stringsAsFactors=F)
-# write.table(bmdexpresstest, file = "bmdexpress_test_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
-
-
 
 fastbmd <- as.data.frame(assay(dds))
 fastbmd <- cbind(SampleID=row.names(fastbmd), fastbmd, stringsAsFactors=F)
@@ -1542,16 +1539,15 @@ clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
 ## All DEGs
 
 ```{r 'pathway_analysis', collapse=TRUE}
-
 entrez_IDs <- as.character(id_table_entrez$entrezgene_id)
 entrezDEGs <- dplyr::left_join(significantResults,
                                id_table_entrez,
                                by="ensembl_gene_id")
 entrezDEGs <- as.vector(entrezDEGs$entrezgene_id)
 
-mouseWiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt")
-wp2gene <- clusterProfiler::read.gmt(mouseWiki)
-wp2gene <- wp2gene %>% tidyr::separate(ont, c("name","version","wpid","org"), "%")
+Wiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt")
+wp2gene <- clusterProfiler::read.gmt(Wiki)
+wp2gene <- wp2gene %>% tidyr::separate(1, c("name","version","wpid","org"), "%")
 wpid2gene <- wp2gene %>% dplyr::select(wpid,gene) #TERM2GENE
 wpid2name <- wp2gene %>% dplyr::select(wpid,name) #TERM2NAME
 wpid2gene
