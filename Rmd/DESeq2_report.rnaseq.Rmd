@@ -10,8 +10,8 @@ output:
     code_folding: hide
     theme: spacelab # flatly spacelab sandstone cerulean
 params:
-  species: rat # pick from human, mouse, rat, hamster
-  design: "group" # a single experimental group of interest
+  species: rat # one of human, mouse, rat, hamster
+  design: "group" # single experimental group of interest
   intgroup: "group" # experimental group of interest plus covariates; can be more than one
   flag: TRUE
   projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash... we try to avoid requiring it though!
@@ -980,7 +980,7 @@ sampleDistsTop <- dist(t(assay(rld)[select,]))
 sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 
 ## Add names based on intgroup
-rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, params$intgroup]), 1,
+rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, params$design]), 1,
     paste, collapse = ' : ')
 colnames(sampleDistMatrixTop) <- NULL
 
@@ -1465,6 +1465,7 @@ table(!is.na(resList[[1]]$padj))
 KeyType <- "ENTREZID" # ENSEMBL? ACCNUM? GID? ENTREZID?
 # head(keys(orgdb, keytype="ENTREZID"))
 
+# Run all at once...
 enrich_go_all <- enrichGO(gene = myDEGs,
                          universe = background, # All genes in dataset
                          OrgDb = orgdb,
@@ -1479,40 +1480,41 @@ enrich_go_all <- enrichGO(gene = myDEGs,
 #   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 50)) +
 #   facet_wrap(~ONTOLOGY)
 
+## Can also do individually...
 ## Perform enrichment analysis for Biological Process (BP)
-enrich_go_bp <- enrichGO(gene = myDEGs,
-                         universe = background, # All genes in dataset
-                         OrgDb = orgdb,
-                         keyType = KeyType,
-                         ont = "BP",
-                         pAdjustMethod = "BH",
-                         pvalueCutoff = 0.01,
-                         qvalueCutoff = 0.05)
-
-enrich_go_mf <- enrichGO(gene = myDEGs,
-                         universe = background, # All genes in dataset
-                         OrgDb = orgdb,
-                         keyType = KeyType,
-                         ont = "MF",
-                         pAdjustMethod = "BH",
-                         pvalueCutoff = 0.01,
-                         qvalueCutoff = 0.05) 
-
-enrich_go_cc <- enrichGO(gene = myDEGs,
-                         universe = background, # All genes in dataset
-                         OrgDb = orgdb,
-                         keyType = KeyType,
-                         ont = "CC",
-                         pAdjustMethod = "BH",
-                         pvalueCutoff = 0.01,
-                         qvalueCutoff = 0.05)
+# enrich_go_bp <- enrichGO(gene = myDEGs,
+#                          universe = background, # All genes in dataset
+#                          OrgDb = orgdb,
+#                          keyType = KeyType,
+#                          ont = "BP",
+#                          pAdjustMethod = "BH",
+#                          pvalueCutoff = 0.01,
+#                          qvalueCutoff = 0.05)
+# 
+# enrich_go_mf <- enrichGO(gene = myDEGs,
+#                          universe = background, # All genes in dataset
+#                          OrgDb = orgdb,
+#                          keyType = KeyType,
+#                          ont = "MF",
+#                          pAdjustMethod = "BH",
+#                          pvalueCutoff = 0.01,
+#                          qvalueCutoff = 0.05) 
+# 
+# enrich_go_cc <- enrichGO(gene = myDEGs,
+#                          universe = background, # All genes in dataset
+#                          OrgDb = orgdb,
+#                          keyType = KeyType,
+#                          ont = "CC",
+#                          pAdjustMethod = "BH",
+#                          pvalueCutoff = 0.01,
+#                          qvalueCutoff = 0.05)
 
 ```
 
 ## Biological processes
 
 ```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
-clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
+clusterProfiler::dotplot(enrich_go_all %>% filter(ONTOLOGY=="BP"), font.size=9, showCategory=20)  +
   theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 ```
@@ -1520,19 +1522,21 @@ clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
 ## Molecular Functions
 
 ```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
-clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
+clusterProfiler::dotplot(enrich_go_all %>% filter(ONTOLOGY=="MF"), font.size=9)  +
    theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 ```
 
 ## Cellular Component
 
+This is not displayed by default because the cellular component ontology does not always have statistically significant enriched  genes. If you are expecting to see results here, the analysis can be repeated.  
+
 ```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
-# clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
+# clusterProfiler::dotplot(enrich_go_all %>% filter(ONTOLOGY=="CC"), font.size=9, c="BgRatio")  +
 #    theme(axis.text.y = element_text(angle = 0)) +
 #   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 
-# Why doesn't this work?
+# Causes
 
 ```
 

@@ -32,5 +32,5 @@ rmarkdown::render(input = inputFile,
 
 
 # Make conda env for ODAF
-#conda create -n myenv python
+#conda create -n myenv
 #conda install -n myenv scipy=0.15.0
