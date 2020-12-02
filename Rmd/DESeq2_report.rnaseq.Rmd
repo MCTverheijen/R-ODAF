@@ -1528,9 +1528,11 @@ clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
 ## Cellular Component
 
 ```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
-clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
-   theme(axis.text.y = element_text(angle = 0)) +
-  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+# clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
+#    theme(axis.text.y = element_text(angle = 0)) +
+#   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+
+# Why doesn't this work?
 
 ```
 
