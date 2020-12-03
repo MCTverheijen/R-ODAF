@@ -7,9 +7,9 @@
 ####################################################
 project=$1 # Call script using project name as the only argument
 #specify the directory for the output
-OUTPUT_DIR="~/shared/projects/${project}/data/output/"
+OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
 #specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
-RAW_SAMPLE_DIR="~/shared/data/${project}/data/raw/"
+RAW_SAMPLE_DIR="${HOME}/shared/data/${project}/data/raw/"
 # specify extention of input files (".fastq" or ".fastq.gz") 
 SUFFIX_INPUTFILES='.fastq.gz' 
 #specify the sequencing mode used to obtain the data
@@ -23,8 +23,8 @@ PAIRED_END_SUFFIX_REVERSE="_R2"
 # hg38 | rnor6_0
 ORGANISM_GENOME_ID="hg38"
 # PATH/Directory in which the genome files are located
-# ~/shared/dbs/human/hg38/ | ~/shared/dbs/rat/ensembl/rnor6_0/v84/genome
-GENOME_FILES_DIR="~/shared/dbs/rat/ensembl/rnor6_0/v84/genome"
+# ${HOME}/shared/dbs/human/hg38/ | ${HOME}/shared/dbs/rat/ensembl/rnor6_0/v84/genome
+GENOME_FILES_DIR="${HOME}/shared/dbs/rat/ensembl/rnor6_0/v84/genome"
 # Filename of genome fasta file (without path)
 # Homo_sapiens_assembly38.fasta | Rnor_6.0.fa
 GENOME_FILE_NAME="Rnor_6.0.fa"
