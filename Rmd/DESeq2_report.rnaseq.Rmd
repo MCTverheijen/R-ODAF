@@ -8,14 +8,18 @@ output:
     toc_float: true
     number_sections: true
     code_folding: hide
-    theme: spacelab # flatly spacelab sandstone cerulean
+    theme: spacelab           # flatly spacelab sandstone cerulean
 params:
-  species: rat # one of human, mouse, rat, hamster
-  design: "group" # single experimental group of interest
-  intgroup: "group" # experimental group of interest plus covariates; can be more than one
-  flag: TRUE
-  projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash... we try to avoid requiring it though!
-  platform: "RNA-Seq"
+  projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash. We try to avoid requiring it though!
+  species: rat                # one of human, mouse, rat, hamster
+  design: "group"             # single experimental group of interest
+  intgroup: "group"           # experimental group of interest plus covariates; can be more than one
+  flag: TRUE                  # runs all analysis by default when set to TRUE
+  platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
+  group_facet: "sex"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: "m"           # Which group will this report be done on?
+  exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
+  exclude_groups: ["f2","m2"] # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
 ---
 
 ***
@@ -124,6 +128,7 @@ if(species=="human"){
   species_sci <- "Homo sapiens"
   ensembl_species <- "hsapiens_gene_ensembl"
   species_gene_symbol <- "external_gene_name"
+  kegg_organism <- "hsa"
 } else {
     if(species=="mouse"){
       # Mouse:
@@ -131,7 +136,8 @@ if(species=="human"){
       orgdb <- "org.Mm.eg.db"
       species_sci <- "Mus musculus"
       ensembl_species <- "mmusculus_gene_ensembl"
-      species_gene_symbol <- "mgi_symbol" 
+      species_gene_symbol <- "mgi_symbol"
+      kegg_organism <- "mmu"
     }
   else {
     if(species=="rat"){
@@ -141,6 +147,7 @@ if(species=="human"){
       species_sci <- "Rattus norvegicus"
       ensembl_species <- "rnorvegicus_gene_ensembl"
       species_gene_symbol <- "mgi_symbol"
+      kegg_organism <- "rno"
     }
   else {
     if(species=="hamster"){
@@ -231,6 +238,18 @@ DESeqDesign <- read.delim(SampleKeyFile,
                           header=TRUE,
                           quote="\"",
                           row.names=1) # Pick column that is used in ID; might be more appropriate to change this!
+DESeqDesign$original_names <- rownames(DESeqDesign)
+
+# Parameter-specified exclusions
+if(!is.null(params$group_facet)) {
+  DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$group_facet)==params$group_filter)
+}
+if(!is.null(params$exclude_samples)) {
+  DESeqDesign <- DESeqDesign %>% dplyr::filter(!original_names %in% params$exclude_samples)
+}
+if(!is.null(params$exclude_groups)) {
+  DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$design) != params$exclude_groups)
+}
 
 NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 
@@ -261,7 +280,6 @@ filteredSampleDataCount <- ncol(sampleData)
 # colnames(sampleData) <- gsub(pattern="^0", replacement="", x=colnames(sampleData))
 
 samples_before <- nrow(DESeqDesign)
-DESeqDesign$original_names <- rownames(DESeqDesign)
 
 # Sanity check: each sample (row) in the metadata should have a corresponding column in the count data
 metadata_in_sampledata <- all(rownames(DESeqDesign) %in% colnames(sampleData))
@@ -536,7 +554,8 @@ if (file.exists("id_table.Rdata")) {
                         attributes= c("ensembl_gene_id",
                                       "external_gene_name", # mgi_symbol for Mouse
                                       "description",
-                                      "entrezgene_id"), # "refseq_mrna" or "refseq_peptide" may be of interest, but can't join with gene tables.
+                                      "entrezgene_id",
+                                      "entrezgene_accession"), # "refseq_mrna" or "refseq_peptide" may be of interest, but can't join with gene tables.
                         values=genes,
                         mart=ensembl)
   save(id_table_entrez, file="./id_table.Rdata")
@@ -1470,6 +1489,7 @@ enrich_go_all <- enrichGO(gene = myDEGs,
                          universe = background, # All genes in dataset
                          OrgDb = orgdb,
                          keyType = KeyType,
+                         readable=T,
                          ont = "all",
                          pAdjustMethod = "BH",
                          pvalueCutoff = 0.01,
@@ -1482,24 +1502,26 @@ enrich_go_all <- enrichGO(gene = myDEGs,
 
 ## Can also do individually...
 ## Perform enrichment analysis for Biological Process (BP)
-# enrich_go_bp <- enrichGO(gene = myDEGs,
-#                          universe = background, # All genes in dataset
-#                          OrgDb = orgdb,
-#                          keyType = KeyType,
-#                          ont = "BP",
-#                          pAdjustMethod = "BH",
-#                          pvalueCutoff = 0.01,
-#                          qvalueCutoff = 0.05)
-# 
-# enrich_go_mf <- enrichGO(gene = myDEGs,
-#                          universe = background, # All genes in dataset
-#                          OrgDb = orgdb,
-#                          keyType = KeyType,
-#                          ont = "MF",
-#                          pAdjustMethod = "BH",
-#                          pvalueCutoff = 0.01,
-#                          qvalueCutoff = 0.05) 
-# 
+enrich_go_bp <- enrichGO(gene = myDEGs,
+                         universe = background, # All genes in dataset
+                         OrgDb = orgdb,
+                         keyType = KeyType,
+                         readable=T,
+                         ont = "BP",
+                         pAdjustMethod = "BH",
+                         pvalueCutoff = 0.01,
+                         qvalueCutoff = 0.05)
+
+enrich_go_mf <- enrichGO(gene = myDEGs,
+                         universe = background, # All genes in dataset
+                         OrgDb = orgdb,
+                         keyType = KeyType,
+                         readable=T,
+                         ont = "MF",
+                         pAdjustMethod = "BH",
+                         pvalueCutoff = 0.01,
+                         qvalueCutoff = 0.05)
+
 # enrich_go_cc <- enrichGO(gene = myDEGs,
 #                          universe = background, # All genes in dataset
 #                          OrgDb = orgdb,
@@ -1514,17 +1536,28 @@ enrich_go_all <- enrichGO(gene = myDEGs,
 ## Biological processes
 
 ```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
-clusterProfiler::dotplot(enrich_go_all %>% filter(ONTOLOGY=="BP"), font.size=9, showCategory=20)  +
+clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
   theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+
+simplified_bp <- simplify(enrich_go_bp)
+cnetplot(simplified_bp, foldChange=foldChanges)
+upsetplot(enrich_go_bp)
+heatplot(simplified_bp, foldChange=foldChanges)
 ```
 
 ## Molecular Functions
 
 ```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
-clusterProfiler::dotplot(enrich_go_all %>% filter(ONTOLOGY=="MF"), font.size=9)  +
+clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
    theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+
+simplified_mf <- simplify(enrich_go_mf)
+cnetplot(simplified_mf, foldChange=foldChanges)
+enrich_go_mf@result$Description <- stringr::str_trunc(enrich_go_mf@result$Description, width=30)
+upsetplot(enrich_go_mf)
+heatplot(simplified_mf, foldChange=foldChanges)
 ```
 
 ## Cellular Component
@@ -1540,9 +1573,9 @@ This is not displayed by default because the cellular component ontology does no
 
 ```
 
-# Pathway Analysis using WikiPathways
+# Pathway Analysis using WikiPathways and GSEA (KEGG)
 
-## All DEGs
+## WikiPathways: All DEGs
 
 ```{r 'pathway_analysis', collapse=TRUE}
 entrez_IDs <- as.character(id_table_entrez$entrezgene_id)
@@ -1573,12 +1606,12 @@ clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 ```
 
-## By contrast {.tabset}
+## WikiPathways: By contrast {.tabset}
 
 ```{r 'pathway_analysis_by_contrast_make_plots', collapse=TRUE}
 plotList <- list()
 for (i in 1:length(levels(significantResults$contrast))) {
-  entrezDEGs <- dplyr::left_join(significantResults[significantResults$contrast==levels(significantResults$contrast)[i],],
+  entrezDEGs <- dplyr::left_join(significantResults %>% filter(contrast==levels(significantResults$contrast)[i]),
                                  id_table_entrez,
                                  by="ensembl_gene_id")
   entrezDEGs <- entrezDEGs$entrezgene_id
@@ -1604,6 +1637,31 @@ for (i in 1:length(levels(significantResults$contrast))) {
   cat('\n\n')
 }
 
+```
+
+## GSEA: By contrast {.tabset}
+
+```{r 'gsea_analysis_by_contrast_make_plots', collapse=TRUE}
+plotListGSEA <- list()
+for (i in 1:length(levels(significantResults$contrast))) {
+DEGs_full <- dplyr::left_join(significantResults %>% filter(contrast==levels(significantResults$contrast)[i]),
+                              id_table_entrez,
+                              by="ensembl_gene_id")
+foldChanges <- DEGs_full %>% dplyr::pull(log2FoldChange)
+names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
+foldChanges <- foldChanges %>% sort() %>% rev()
+foldChanges <- foldChanges[!is.na(names(foldChanges))]
+kk <- gseKEGG(foldChanges, keyType="ncbi-geneid", organism=kegg_organism)
+if(dim(kk@result)[1] > 0){plotListGSEA[[i]] <- ridgeplot(kk)} else {plotListGSEA[[i]] <- "No results"}
+}
+```
+
+```{r 'gsea_analysis_by_contrast_print_plots', results='asis'}
+for (i in 1:length(levels(significantResults$contrast))) {
+  cat("###", levels(significantResults$contrast)[i], " \n")
+  print(plotListGSEA[[i]])
+  cat('\n\n')
+}
 ```
 
 # Session Info
