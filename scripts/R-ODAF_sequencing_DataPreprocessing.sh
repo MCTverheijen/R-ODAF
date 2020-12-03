@@ -105,11 +105,11 @@ mkdir -p ${Quant_DIR}
 mkdir -p ${RSEM_GENOMEDIR}
 echo "Done."
 
-# echo "Starting logging..."
-# exec 3>&1 4>&2
-# trap 'exec 2>&4 1>&3' 0 1 2 3
-# mydate="$(date +'%d.%m.%Y.%H-%M')"
-# exec 1>${OUTPUT_DIR}/log_${mydate}.out 2>&1
+echo "Starting logging..."
+exec 3>&1 4>&2
+trap 'exec 2>&4 1>&3' 0 1 2 3
+mydate="$(date +'%d.%m.%Y.%H-%M')"
+exec 1>${OUTPUT_DIR}/log_${mydate}.out 2>&1
 
 echo "Activating required software."
 conda activate odaf
