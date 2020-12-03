@@ -9,7 +9,7 @@ project=$0 # Call script using project name as the only argument
 #specify the directory for the output
 OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
 #specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
-RAW_SAMPLE_DIR="${HOME}/shared/data/${project}/data/raw/"
+RAW_SAMPLE_DIR="${HOME}/shared/projects/${project}/data/raw/"
 # specify extention of input files (".fastq" or ".fastq.gz") 
 SUFFIX_INPUTFILES='.fastq.gz' 
 #specify the sequencing mode used to obtain the data
