@@ -110,7 +110,7 @@ trap 'exec 2>&4 1>&3' 0 1 2 3
 mydate="$(date +'%d.%m.%Y.%H-%M')"
 exec 1>${OUTPUT_DIR}/log_${mydate}.out 2>&1
 
-conda activate odaf
+source activate odaf
 
 ###################################################################################################
 ### Trimming raw reads : Fastp ###
