@@ -96,6 +96,7 @@ declare RSEM_GENOMEDIR="${GENOMEDIR}/RSEM/"
 declare SUFFIX1=${SUFFIX_IN}
 declare SUFFIX_out="_trimmed${SUFFIX_IN}"
 
+echo "Intializing directories..."
 mkdir -p ${TRIMM_DIR}
 mkdir -p ${QC_DIR_fastp}
 mkdir -p ${QC_DIR_multiQC}
