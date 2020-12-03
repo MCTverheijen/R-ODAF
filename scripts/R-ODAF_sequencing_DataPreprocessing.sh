@@ -112,7 +112,7 @@ mydate="$(date +'%d.%m.%Y.%H-%M')"
 exec 1>${OUTPUT_DIR}/log_${mydate}.out 2>&1
 
 echo "Activating required software."
-source activate odaf
+conda activate odaf
 
 ###################################################################################################
 ### Trimming raw reads : Fastp ###
