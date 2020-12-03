@@ -5,7 +5,7 @@
 ####################################################
 #### Settings which need to be adapted by user #####
 ####################################################
-project=$1 # Call script using project name as the only argument
+project=$0 # Call script using project name as the only argument
 #specify the directory for the output
 OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
 #specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
