@@ -159,7 +159,7 @@ for FILENAME in ${FILES1[@]}; do
 	   [ -e ${TRIMM_DIR}${READ2:${#SOURCEDIR}:-${#SUFFIX1}}${SUFFIX_out}  ]; then
 		echo "Files exist, continuing"
 	fastp \
-	--in1 ${READ1}\
+	--in1 ${READ1} \
 	--in2 ${READ2} \
 	--out1 ${TRIMM_DIR}${READ1:${#SOURCEDIR}:-${#SUFFIX1}}${SUFFIX_out} \
 	--out2 ${TRIMM_DIR}${READ2:${#SOURCEDIR}:-${#SUFFIX1}}${SUFFIX_out} \
