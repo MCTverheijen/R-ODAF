@@ -315,7 +315,7 @@ biospyder_annos <- biospyder %>% select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL
 head(rownames(DESeqDesign))
 head(colnames(sampleData)) # Output should match
 intgroups <- params$intgroup
-if (file.exists(file.path(paths$DEG_output, "dds.Rdata"))) {
+if (file.exists(file.path(paths$DEG_output, "dds.Rdata")) & is.null(params$group_facet)) {
   print(paste("Already found DESeq2 object from previous run; loading from disk."))
   load(file.path(paths$DEG_output,"/dds.Rdata"))
   if (!identical(as.data.frame(round(counts(dds))),
@@ -1438,14 +1438,14 @@ ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
 ###########################################################################################
 ######## PRODUCE INPUT FOR BMDExpress2 ####################################################
 ###########################################################################################
-
+# Maybe run this code conditional on whether there is a column matching the word dose in the metadata
 # # Create input file...
 #lognorm.read.counts <- as.data.frame(counts(dds, normalized=TRUE))
 # rld normalized, size factor normalized, rounded to 4 significant figures
 bmdexpress <- as.data.frame(assay(rld))
 bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
 bmdexpress <- rbind( Dose=c("#CLASS:DOSE",as.numeric(DESeqDesign$dose)), bmdexpress, stringsAsFactors=F)
-write.table(bmdexpress, file = "bmdexpress_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+write.table(bmdexpress, file = "./DEG_output/bmdexpress_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
 
 fastbmd <- as.data.frame(assay(dds))
 fastbmd <- cbind(SampleID=row.names(fastbmd), fastbmd, stringsAsFactors=F)
@@ -1455,7 +1455,7 @@ fastbmd <- rbind( Chemical=c("#CLASS:CHEMICAL",as.character(DESeqDesign[DESeqDes
 fastbmd <- rbind( Dose=c("#CLASS:DOSE",format(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$dose, scientific=F)),
                   fastbmd,
                   stringsAsFactors=F)
-write.table(fastbmd, file = "fastbmd_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+write.table(fastbmd, file = "./DEG_output/fastbmd_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
 
 ```
 
