@@ -5,6 +5,7 @@
 ####################################################
 #### Settings which need to be adapted by user #####
 ####################################################
+source ~/miniconda3/etc/profile.d/conda.sh
 project=$1 # Call script using project name as the only argument
 #specify the directory for the output
 OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
@@ -13,15 +14,15 @@ RAW_SAMPLE_DIR="${HOME}/shared/projects/${project}/data/raw/"
 # specify extention of input files (".fastq" or ".fastq.gz") 
 SUFFIX_INPUTFILES='.fastq.gz' 
 #specify the sequencing mode used to obtain the data
-SEQMODE="single" #specify "paired" or "single" end mode
+SEQMODE="paired" #specify "paired" or "single" end mode
 # specify the read suffix (e.g. "_R1_001")
 PAIRED_END_SUFFIX_FORWARD=""
 # *IF* paired end mode was used, specify the reverse suffix as well (e.g. "_R2")
 PAIRED_END_SUFFIX_REVERSE="_R2"
 
 # Choose the main organism for genome alignment (e.g "Rat_6.0.97"). {NOTE: This ID is a label specific for this script and is made for the user to identify which genome version was used. It can contain any text}.
-# hg38 | rnor6_0
-ORGANISM_GENOME_ID="hg38"
+# hg38 | Rat_6.0.84
+ORGANISM_GENOME_ID="Rat_6.0.84"
 # PATH/Directory in which the genome files are located
 # ${HOME}/shared/dbs/human/hg38/ | ${HOME}/shared/dbs/rat/ensembl/rnor6_0/v84/genome
 GENOME_FILES_DIR="${HOME}/shared/dbs/rat/ensembl/rnor6_0/v84/genome"
