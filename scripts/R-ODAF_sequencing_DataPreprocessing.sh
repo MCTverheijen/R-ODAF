@@ -223,7 +223,7 @@ cd ${SOURCEDIR}
 # Aligning reads single end
 if [ ${SEQMODE} == "single" ]; then
 	declare FILES1=${OUTPUTDIR}*${PAIR1}*${SUFFIX1}
-for FILENAME in ${FILES1[@]}; do
+  for FILENAME in ${FILES1[@]}; do
 	READ1=${FILENAME:0:-${#SUFFIX1}}	
 	#Prevent overwrite: 
 	if [ -e ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}Log.final.out  ]; then
@@ -249,18 +249,19 @@ for FILENAME in ${FILES1[@]}; do
 			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
 		fi
 	fi
-done;fi
+done; fi
 
 # Aligning reads paired end
 if [ ${SEQMODE} == "paired" ]; then
 	declare FILES1=${OUTPUTDIR}*${PAIR1}*${SUFFIX1}		
-for FILENAME in ${FILES1[@]}; do
+  for FILENAME in ${FILES1[@]}; do
 	READ1=${FILENAME:0:-${#SUFFIX1}}	
 	READ2=${FILENAME:0:-${#SUFFIX1}-(${#PAIR1}+8)}${PAIR2}"_trimmed"
 	#Prevent overwrite: 
 	if [ -e ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}Log.final.out  ]; then
 		echo "File exists, continuing"
-		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}]" 
+	else
+		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}]"\
 		if [[ "${SUFFIX1}" == *".gz" ]]; then
 			echo "gzipped file detected, using zcat to read"
 			STAR \
