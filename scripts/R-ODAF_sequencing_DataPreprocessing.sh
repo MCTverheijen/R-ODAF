@@ -143,7 +143,8 @@ for FILENAME in ${FILES1[@]}; do
 		--cut_tail_mean_quality 3 \
 		--cut_right --cut_right_window_size 4 \
 		--cut_right_mean_quality 15 \
-		--length_required 36
+		--length_required 36 \
+		--thread ${CPUs}
 	fi
 done; fi
 
@@ -174,7 +175,8 @@ if [ ${SEQMODE} == "paired" ]; then
 	--cut_right \
 	--cut_right_window_size 4 \
 	--cut_right_mean_quality 15 \
-	--length_required 36
+	--length_required 36 \
+	--thread ${CPUs}
 	fi
 done; fi
 
