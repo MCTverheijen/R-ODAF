@@ -12,7 +12,7 @@ output:
 params:
   projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash. We try to avoid requiring it though!
   species: rat                # one of human, mouse, rat, hamster
-  design: "group"             # single experimental group of interest
+  design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
   intgroup: "group"           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
@@ -113,10 +113,6 @@ library('BiocParallel')
 library('clusterProfiler')
 library('biomaRt')
 library('AnnotationHub')
-
-# Not needed?
-#library('regionReport')
-#library('vsn')
 
 # Load genome, depends on species
 # To add: Zebrafish, Folsomia candida, others?
@@ -251,6 +247,17 @@ if(!is.null(params$exclude_groups)) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$design) != params$exclude_groups)
 }
 
+# Conditionally exclude contrasts that should be filtered
+# 1. Filter by group filter - useful for selecting one treatment at a time. params$group_filter
+# 2. Filter manually - useful for removing irrelevant control groups (e.g. reference RNA). params$exclude_groups
+contrasts_to_filter <- DESeqDesign %>% 
+  dplyr::filter(!!sym(params$group_facet)==params$group_filter) %>% 
+  dplyr::filter(!(!!sym(params$design)) %in% params$exclude_groups) %>%
+  pull(params$design) %>% 
+  unique()
+
+contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
+
 NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 
 plotdir <- paste(paths$DEG_output, "/plots/", sep="")
@@ -294,6 +301,7 @@ samples_after <- nrow(DESeqDesign)
 
 # For TempO-Seq: Limit sampleData matrix to genes in the assay.
 if (Platform=="TempO-Seq") {
+  # ADD MORE CODE HERE - NEED TO CONDITIONALLY SUM PROBES IN SAMPLE DATA!
 biospyder <- read.delim("~/dbs/biospyder/191113_Human_S1500_Surrogate_2.0_Manifest.csv", # Assay manifest...
                           stringsAsFactors=FALSE,
                           sep="\t",
@@ -321,7 +329,7 @@ if (file.exists(file.path(paths$DEG_output, "dds.Rdata"))) {
   dds <- dds[,rownames(DESeqDesign)]
   dds <- dds[rowSums(counts(dds)) > 1]
   dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(39))
-  save(dds, file=file.path(paths$DEG_output,"dds.Rdata"))
+  save(dds, file=file.path(paths$DEG_output,"dds.Rdata")) # FIX THIS AND OTHER SAVES - when needed, modify file name to include group ID (just like HTML report output filename) ### ALSO check where bmdexpress and fastbmd text files are being saved...
   }
 
 # ### REMOVE if done above from scratch
@@ -370,6 +378,7 @@ Following the removal of other samples (i.e., reference RNA, etc.), there were `
 This table shows the final list of samples that were used in the data analysis (as well as corresponding sample information as it was communicated to the Genomics Laboratory).  
 
 ```{r print_metadata}
+# Feature to add: make this section a tabset - first tab includes samples that made it to analysis; second tab is samples exlcuded; third tab is all original metadata.
 knitr::kable(DESeqDesign %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="User-provided information about samples and experimental conditions") %>%
