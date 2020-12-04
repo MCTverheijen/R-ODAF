@@ -150,7 +150,7 @@ done; fi
 # trimming paired end reads  
 if [ ${SEQMODE} == "paired" ]; then
 	declare FILES1="${SOURCEDIR}*${PAIR1}${SUFFIX1}";
-for FILENAME in ${FILES1[@]}; do
+	for FILENAME in ${FILES1[@]}; do
 	READ1=${FILENAME}	
 	READ2=${FILENAME:0:-${#SUFFIX1}-${#PAIR1}}${PAIR2}${SUFFIX1}
 	echo -e "[TRIMMING] fastp: [${READ1:${#SOURCEDIR}:-${#PAIR1}-${#SUFFIX1}}]"
@@ -158,6 +158,7 @@ for FILENAME in ${FILES1[@]}; do
 	if [ -e ${TRIMM_DIR}${READ1:${#SOURCEDIR}:-${#SUFFIX1}}${SUFFIX_out}  ] && \
 	   [ -e ${TRIMM_DIR}${READ2:${#SOURCEDIR}:-${#SUFFIX1}}${SUFFIX_out}  ]; then
 		echo "Files exist, continuing"
+	else
 	fastp \
 	--in1 ${READ1} \
 	--in2 ${READ2} \
@@ -279,7 +280,7 @@ for FILENAME in ${FILES1[@]}; do
 			--outFileNamePrefix ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}
 		fi
 	fi
-done;fi
+done; fi
 
 #######################
 # QUANTIFICATION RSEM #
