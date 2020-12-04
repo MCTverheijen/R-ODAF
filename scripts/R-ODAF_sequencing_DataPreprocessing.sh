@@ -18,7 +18,7 @@ SEQMODE="paired" #specify "paired" or "single" end mode
 # specify the read suffix (e.g. "_R1_001")
 PAIRED_END_SUFFIX_FORWARD="_R1_001"
 # *IF* paired end mode was used, specify the reverse suffix as well (e.g. "_R2")
-PAIRED_END_SUFFIX_REVERSE="_R2_002"
+PAIRED_END_SUFFIX_REVERSE="_R2_001"
 
 # Choose the main organism for genome alignment (e.g "Rat_6.0.97"). {NOTE: This ID is a label specific for this script and is made for the user to identify which genome version was used. It can contain any text}.
 # hg38 | Rat_6.0.84
