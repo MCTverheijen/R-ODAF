@@ -261,7 +261,7 @@ if [ ${SEQMODE} == "paired" ]; then
 	if [ -e ${align_DIR}${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}Log.final.out  ]; then
 		echo "File exists, continuing"
 	else
-		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}]"\
+		echo -e "[ALIGNING] STAR : [${READ1:${#OUTPUTDIR}:-(${#PAIR1}+8)}]" \
 		if [[ "${SUFFIX1}" == *".gz" ]]; then
 			echo "gzipped file detected, using zcat to read"
 			STAR \
