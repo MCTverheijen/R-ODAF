@@ -5,7 +5,7 @@
 ####################################################
 #### Settings which need to be adapted by user #####
 ####################################################
-#source ~/miniconda3/etc/profile.d/conda.sh
+source ~/miniconda3/etc/profile.d/conda.sh
 project=$1 # Call script using project name as the only argument
 #specify the directory for the output
 OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
@@ -111,6 +111,8 @@ exec 3>&1 4>&2
 trap 'exec 2>&4 1>&3' 0 1 2 3
 mydate="$(date +'%d.%m.%Y.%H-%M')"
 exec 1>${OUTPUT_DIR}/log_${mydate}.out 2>&1
+
+echo $SHELL
 
 echo "Activating required software."
 conda activate odaf
