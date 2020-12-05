@@ -327,7 +327,7 @@ head(colnames(sampleData)) # Output should match
 intgroups <- params$intgroup
 if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_facet)) {
   print(paste("Already found DESeq2 object from previous run; loading from disk."))
-  load(file.path(paths$RData,"/dds.Rdata"))
+  load(file.path(paths$RData,"dds.RData"))
   if (!identical(as.data.frame(round(counts(dds))),
                  round(sampleData),0)) {
     print("Not identical")
