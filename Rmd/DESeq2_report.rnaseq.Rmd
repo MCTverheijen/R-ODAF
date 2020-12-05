@@ -16,8 +16,8 @@ params:
   intgroup: "group"           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: "sex"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: "m"           # Which group will this report be done on?
+  group_facet: NULL          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: NULL           # Which group will this report be done on?
   exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: ["f2","m2"] # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
 ---
@@ -57,7 +57,12 @@ paths$output <- paste0(paths$data, "/output")
 paths$processed <- paste0(paths$data, "/processed")
 paths$metadata <- paste0(paths$root, "/metadata")
 paths$reports <- paste0(paths$root, "/reports")
-paths$DEG_output <- paste0(paths$root, "/DEG_output")
+if(is.null(params$group_facet)) {
+  paths$DEG_output <- paste0(paths$root, "/DEG_output")
+} else {
+  paths$DEG_output <- paste0(paths$root, "/DEG_output/group_", params$group_filter)
+}
+paths$RData <- paste0(paths$DEG_output, "/RData")
 
 ## knitrBoostrap and device chunk options
 # Set so that long lines in R will be wrapped:
@@ -178,6 +183,7 @@ The code above (not shown by default) loads the relevant R packages required for
 # Set file locations
 if(!dir.exists(paths$DEG_output)){
   dir.create(paths$DEG_output)
+  dir.create(paths$RData)
   }
 
 # FILES TO LOAD
@@ -237,26 +243,29 @@ DESeqDesign <- read.delim(SampleKeyFile,
 DESeqDesign$original_names <- rownames(DESeqDesign)
 
 # Parameter-specified exclusions
+# Conditionally exclude contrasts and metadata that should be filtered
+# 1. Filter by group filter - useful for selecting one treatment at a time. params$group_filter
+# 2. Filter manually - useful for removing irrelevant control groups (e.g. reference RNA). params$exclude_groups
+# Note that these should only be run if the repsective variables are set.
 if(!is.null(params$group_facet)) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$group_facet)==params$group_filter)
+  contrasts_to_filter <- DESeqDesign %>%
+  dplyr::filter(!!sym(params$group_facet)==params$group_filter) %>%
+  pull(params$design) %>% 
+  unique()
+  contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
 }
 if(!is.null(params$exclude_samples)) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!original_names %in% params$exclude_samples)
 }
 if(!is.null(params$exclude_groups)) {
-  DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$design) != params$exclude_groups)
-}
-
-# Conditionally exclude contrasts that should be filtered
-# 1. Filter by group filter - useful for selecting one treatment at a time. params$group_filter
-# 2. Filter manually - useful for removing irrelevant control groups (e.g. reference RNA). params$exclude_groups
-contrasts_to_filter <- DESeqDesign %>% 
-  dplyr::filter(!!sym(params$group_facet)==params$group_filter) %>% 
+  DESeqDesign <- DESeqDesign %>% dplyr::filter(!(!!sym(params$design)) %in% params$exclude_groups)
+  contrasts_to_filter <- DESeqDesign %>% 
   dplyr::filter(!(!!sym(params$design)) %in% params$exclude_groups) %>%
   pull(params$design) %>% 
   unique()
-
-contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
+  contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
+}
 
 NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 
@@ -314,23 +323,33 @@ biospyder_annos <- biospyder %>% select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL
 
 head(rownames(DESeqDesign))
 head(colnames(sampleData)) # Output should match
+
 intgroups <- params$intgroup
-if (file.exists(file.path(paths$DEG_output, "dds.Rdata")) & is.null(params$group_facet)) {
+if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_facet)) {
   print(paste("Already found DESeq2 object from previous run; loading from disk."))
-  load(file.path(paths$DEG_output,"/dds.Rdata"))
+  load(file.path(paths$RData,"/dds.Rdata"))
   if (!identical(as.data.frame(round(counts(dds))),
                  round(sampleData),0)) {
     print("Not identical")
     }
   } else {
-  dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
-                                colData = as.data.frame(DESeqDesign),
-                                design = formula(paste("~",intgroups)) )
-  dds <- dds[,rownames(DESeqDesign)]
-  dds <- dds[rowSums(counts(dds)) > 1]
-  dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(39))
-  save(dds, file=file.path(paths$DEG_output,"dds.Rdata")) # FIX THIS AND OTHER SAVES - when needed, modify file name to include group ID (just like HTML report output filename) ### ALSO check where bmdexpress and fastbmd text files are being saved...
-  }
+    if(file.exists(file.path(paths$RData, paste0("dds_", params$group_filter, ".RData"))) & !is.null(params$group_facet)) {
+      load(file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
+      } else {
+      dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
+                                    colData = as.data.frame(DESeqDesign),
+                                    design = formula(paste("~",intgroups)) )
+      dds <- dds[,rownames(DESeqDesign)]
+      dds <- dds[rowSums(counts(dds)) > 1]
+      dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(39))
+      if(is.null(params$group_facet)) {
+        save(dds, file=file.path(paths$RData, "dds.RData"))
+      } else {
+        save(dds, file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
+      }
+    }
+}
+
 
 # ### REMOVE if done above from scratch
 # keep <- grep(colData(dds)$chemical, pattern="cells", invert=T, ignore.case = T)
@@ -355,7 +374,6 @@ if (Platform=="RNA-Seq"){
   linear_fc_filter = 1.5
 } else { print("Platform/technology not recognized") }
 
-
 # Make regularized log object for later plotting
 #rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
 # Use vst for hundreds of samples!
@@ -379,6 +397,7 @@ This table shows the final list of samples that were used in the data analysis (
 
 ```{r print_metadata}
 # Feature to add: make this section a tabset - first tab includes samples that made it to analysis; second tab is samples exlcuded; third tab is all original metadata.
+# Conditionally sort by dose if that column name is present?
 knitr::kable(DESeqDesign %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="User-provided information about samples and experimental conditions") %>%
@@ -551,12 +570,11 @@ ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "useast.ensembl
 #listFilters(ensembl)
 
 genes <- row.names(resList[[1]])
-
 #genes_all <- unique(row.names(assay(dds)))
-setwd(paths$DEG_output) # Should avoid this... change ASAP
-if (file.exists("id_table.Rdata")) {
+
+if (file.exists(file.path(paths$RData,"id_table.Rdata"))) {
   print(paste("Already found ID table; skipping biomaRt query and loading from disk."))
-  load("./id_table.Rdata")
+  load(file.path(paths$RData,"id_table.Rdata"))
   id_table <- id_table_entrez[,1:3]
   } else {
   id_table_entrez <- getBM(filters="ensembl_gene_id",
@@ -564,10 +582,10 @@ if (file.exists("id_table.Rdata")) {
                                       "external_gene_name", # mgi_symbol for Mouse
                                       "description",
                                       "entrezgene_id",
-                                      "entrezgene_accession"), # "refseq_mrna" or "refseq_peptide" may be of interest, but can't join with gene tables.
+                                      "entrezgene_accession"),
                         values=genes,
                         mart=ensembl)
-  save(id_table_entrez, file="./id_table.Rdata")
+  save(id_table_entrez, file=file.path(paths$RData,"id_table.Rdata"))
   id_table <- id_table_entrez[,1:3]
 }
 
@@ -608,8 +626,6 @@ significantResults <- dplyr::distinct(significantResults)
 significantResults$contrast <- factor(significantResults$contrast)
 # All results including non-significant
 allResults <- rbindlist(alltablList)
-
-
 
 # All Results for Plotting
 # Replace NA gene symbols with ensembl ID
@@ -874,8 +890,11 @@ xfun::embed_dir(ODAFdir, name = "RNASeq_R-ODAF_text_files.zip")
 
 ```{r 'save_point', show=FALSE, eval=flag}
 # Save RData here if flag is TRUE.
-setwd(paths$DEG_output)
-save.image(file = "Partial_analysis.RData")
+if(is.null(params$group_facet)) {
+  save.image(file = file.path(paths$RData, "Partial_analysis.RData"))
+} else {
+  save.image(file = file.path(paths$RData, paste0("Partial_analysis_", params$group_filter, ".RData")))
+}
 # Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
 # If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
 ```
@@ -891,14 +910,6 @@ plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)))
 data_pca <- plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)), returnData = TRUE)
 percentVar <- round(100 * attr(data_pca, "percentVar"))
 
-# PCAplot <- plotPCA(rld, intgroup = c("dose","group","treatment"), ntop=nrow(assay(rld)), returnData = TRUE)
-# ggplot(PCAplot, aes(PC1, PC2, color=dose)) +
-#   geom_point(size=1) +
-#   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
-#   ylab(paste0("PC2: ",percentVar[2],"% variance")) +
-#   coord_fixed()
-
-
 ```
 
 This plot shows the first two principal components that explain the variability in the data using the regularized log count data. If you are unfamiliar with principal component analysis, you might want to check the [Wikipedia entry](https://en.wikipedia.org/wiki/Principal_component_analysis) or this [interactive explanation](http://setosa.io/ev/principal-component-analysis/). In this case, the first and second principal component explain `r percentVar[1]` and `r percentVar[2]` percent of the variance respectively.
@@ -907,20 +918,13 @@ This plot shows the first two principal components that explain the variability 
 
 ```{r 'PCA_DEGs'}
 rld_degs <- rld[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
-## Perform PCA analysis and make plot
-plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs)) #+ theme(legend.position = "none")
-PCAplotDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(assay(rld_degs)), returnData = TRUE)
 
-# ggplot(PCAplotDEGs, aes(PC1, PC2, color=dose)) + 
-#   geom_point(size=1) +
-#   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
-#   ylab(paste0("PC2: ",percentVar[2],"% variance")) +
-#   facet_wrap(~group) +
-#   coord_fixed()
+## Perform PCA analysis and make plot
+plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs))
+PCAplotDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs), returnData = TRUE)
 
 ## Get percent of variance explained
-data_pcaDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, returnData = TRUE, ntop=nrow(rld_degs))
-percentVarDEGs <- round(100 * attr(data_pcaDEGs, "percentVar"))
+percentVarDEGs <- round(100 * attr(PCAplotDEGs, "percentVar"))
 ```
 
 This plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarDEGs[1]` and `r percentVarDEGs[2]` percent of the variance respectively.
@@ -1593,8 +1597,8 @@ entrezDEGs <- dplyr::left_join(significantResults,
                                by="ensembl_gene_id")
 entrezDEGs <- as.vector(entrezDEGs$entrezgene_id)
 
-Wiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt")
-wp2gene <- clusterProfiler::read.gmt(Wiki)
+Wiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt", destpath = paths$DEG_output)
+wp2gene <- clusterProfiler::read.gmt(file.path(paths$DEG_output,Wiki))
 wp2gene <- wp2gene %>% tidyr::separate(1, c("name","version","wpid","org"), "%")
 wpid2gene <- wp2gene %>% dplyr::select(wpid,gene) #TERM2GENE
 wpid2name <- wp2gene %>% dplyr::select(wpid,name) #TERM2NAME
@@ -1702,8 +1706,11 @@ Pandoc version used: `r rmarkdown::pandoc_version()`.
 
 ```{r 'save_final', show=FALSE}
 # Save complete workspace
-setwd(paths$DEG_output)
-save.image(file = "Complete_analysis.RData")
+if(is.null(params$group_facet)) {
+  save.image(file = file.path(paths$RData, "Complete_analysis.RData"))
+} else {
+  save.image(file = file.path(paths$RData, paste0("Complete_analysis_", params$group_filter, ".RData")))
+}
 # Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
 # If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
 ```
