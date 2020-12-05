@@ -1553,6 +1553,15 @@ clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
   theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 
+DEGs_full <- dplyr::left_join(significantResults,
+                              id_table_entrez,
+                              by="ensembl_gene_id") %>%
+  distinct()
+foldChanges <- DEGs_full %>% dplyr::pull(log2FoldChange)
+names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
+foldChanges <- foldChanges %>% sort() %>% rev()
+foldChanges <- foldChanges[!is.na(names(foldChanges))]
+
 simplified_bp <- simplify(enrich_go_bp)
 cnetplot(simplified_bp, foldChange=foldChanges)
 upsetplot(enrich_go_bp)
