@@ -1637,6 +1637,7 @@ for (i in 1:length(levels(significantResults$contrast))) {
                                  id_table_entrez,
                                  by="ensembl_gene_id")
   entrezDEGs <- entrezDEGs$entrezgene_id
+  if (length(entrezDEGs)<10) { next }
   DEG_pathways <- clusterProfiler::enricher(
           entrezDEGs,
           universe = entrez_IDs,
@@ -1673,6 +1674,7 @@ foldChanges <- DEGs_full %>% dplyr::pull(log2FoldChange)
 names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
 foldChanges <- foldChanges %>% sort() %>% rev()
 foldChanges <- foldChanges[!is.na(names(foldChanges))]
+if (length(foldChanges) < 10) {next}
 kk <- gseKEGG(foldChanges, keyType="ncbi-geneid", organism=kegg_organism)
 if(dim(kk@result)[1] > 0){plotListGSEA[[i]] <- ridgeplot(kk)} else {plotListGSEA[[i]] <- "No results"}
 }
@@ -1694,6 +1696,13 @@ Date the report was generated.
 ## Date the report was generated
 Sys.time()
 ```
+
+Parameters (from the list elements for each params${whatever}) used to generate this report.
+
+```{r paramsList, echo=FALSE}
+knitr::kable(as.data.frame(unlist(params)))
+```
+
 
 Wallclock time spent generating the report.
 
