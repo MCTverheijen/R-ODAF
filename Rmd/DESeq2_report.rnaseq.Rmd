@@ -20,6 +20,7 @@ params:
   group_filter: NULL           # Which group will this report be done on?
   exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: ["f2","m2"] # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
+  use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
 ---
 
 ***
