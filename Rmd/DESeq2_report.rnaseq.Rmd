@@ -304,7 +304,6 @@ sampledata_in_metadata <- all(colnames(sampleData) %in% rownames(DESeqDesign))
 removed <- colnames(sampleData[which(!colnames(sampleData) %in% rownames(DESeqDesign))])
 DESeqDesign <- DESeqDesign[(colnames(sampleData)),] # Reorder the metadata table to correspond to the order of columns in the count data
 DESeqDesign <- na.omit(DESeqDesign)
-# DESeqDesign <- DESeqDesign[ DESeqDesign$treatment != "human reference RNA",] # Remove samples manually
 sampleData <- sampleData[,(rownames(DESeqDesign))]
 samples_after <- nrow(DESeqDesign)
 
@@ -325,7 +324,11 @@ head(rownames(DESeqDesign))
 head(colnames(sampleData)) # Output should match
 
 intgroups <- params$intgroup
-if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_facet)) {
+# Intgroups need to be factors for DESeq2
+DESeqDesign[intgroups] <- lapply(DESeqDesign[intgroups], factor)
+if(!is.null(params$group)) { DESeqDesign[params$group] <- as.factor(DESeqDesign[params$group]) }
+
+if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_facet) & params$use_cached_RData == TRUE) {
   print(paste("Already found DESeq2 object from previous run; loading from disk."))
   load(file.path(paths$RData,"dds.RData"))
   if (!identical(as.data.frame(round(counts(dds))),
@@ -333,12 +336,12 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_face
     print("Not identical")
     }
   } else {
-    if(file.exists(file.path(paths$RData, paste0("dds_", params$group_filter, ".RData"))) & !is.null(params$group_facet)) {
+    if(file.exists(file.path(paths$RData, paste0("dds_", params$group_filter, ".RData"))) & !is.null(params$group_facet) & params$use_cached_RData == TRUE) {
       load(file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
       } else {
       dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
                                     colData = as.data.frame(DESeqDesign),
-                                    design = formula(paste("~",intgroups)) )
+                                    design = formula(paste("~", DESIGN)) ) # replace with intgroups if you have a good reason to
       dds <- dds[,rownames(DESeqDesign)]
       dds <- dds[rowSums(counts(dds)) > 1]
       dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(39))
@@ -349,7 +352,6 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_face
       }
     }
 }
-
 
 # ### REMOVE if done above from scratch
 # keep <- grep(colData(dds)$chemical, pattern="cells", invert=T, ignore.case = T)
@@ -381,7 +383,7 @@ rld <- vst(dds) # Should this be blind?
  
 ```
 
-The code above (not shown by default) uses DESeq2 `r packageVersion("DESeq2")` to test for differentially abundant genes within the `r Platform` data.  
+The code above (not shown by default) uses DESeq2 `r packageVersion("DESeq2")` to test for deferentially abundant genes within the `r Platform` data.  
 
 Prior to running DESeq2, the data was filtered to remove samples that do not have `r threshold` reads per sample.  
 
@@ -461,8 +463,13 @@ The code above (not shown by default) loads in plotting functions specific to th
 ## Run pairwise comparisons
 
 ```{r 'run_ODAF_code', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
-cooks <- FALSE # Normally set Cook's cutoff to false
+
+# Initial setup for DESeq2 contrasts
+cooks   <- FALSE # Normally set Cook's cutoff to false
 resList <- list()
+Counts  <- counts(dds, normalized=TRUE)
+CPMdds  <- cpm(counts(dds, normalized=TRUE))
+
 for (x in 1:nrow(contrasts)) {	## for all comparisons to be done	
 	
   condition1 <- contrasts[x,2]
@@ -470,8 +477,8 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	print(paste(condition2, " vs ", condition1, ":", NORM_TYPE))
 	
 	DE_Design <- matrix(data=NA, ncol=2)
-	DE_Design <- DESeqDesign[c(grep(condition1,DESeqDesign[,DESIGN]), grep(condition2,DESeqDesign[,DESIGN])),]
-	samples <- sampleData[, rownames(DE_Design) ]
+	DE_Design <- as.matrix(DESeqDesign[c(grep(condition1,DESeqDesign[,DESIGN]), grep(condition2,DESeqDesign[,DESIGN])),])
+	samples   <- sampleData[, rownames(DE_Design)]
 	colnames(samples) <- NULL
 	
 	###########
@@ -479,26 +486,24 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	print(paste0("Filtering genes: 75% of at least 1 group need to be above ", MinCount, " CPM"))
 	print("AND")
 	print("Detecting spurious spikes: Max-Median > Sum/(Rep+1)" )
-		SampPerGroup<-table(DE_Design[,DESIGN])
-		idx<-FlagSpike<-NameRows<-NULL
-		Counts<-counts(dds, normalized=TRUE)
-		CPMdds<-cpm(counts(dds, normalized=TRUE))
-		for (gene in 1:nrow(dds)) {
-			GroupsPass <- checkSpike<-NULL
-			for (group in 1:length(SampPerGroup)) { #test if group passes
-				sampleCols<-grep(dimnames(SampPerGroup)[[1]][group],DE_Design[,DESIGN])
-				Check<-sum(CPMdds[gene,sampleCols] >= MinCount)>= 0.75*SampPerGroup[group]
-				GroupsPass<-c(GroupsPass, Check)
-				if (Check == FALSE) {checkSpike<- c(checkSpike, Check)} else {
-					checkSpike<-c(checkSpike, ((max(Counts[gene,sampleCols])-median(Counts[gene,sampleCols])) >=
-					                             (sum(Counts[gene,sampleCols])/(SampPerGroup[group]+1))))
+		SampPerGroup <- table(DE_Design[,DESIGN])
+		idx          <- FlagSpike <- NameRows <- NULL
+		for (gene in 1:nrow(dds)) { # Loop over each gene
+			GroupsPass <- checkSpike <- NULL
+			for (group in 1:length(SampPerGroup)) { # Test if group passes
+				sampleCols <- grep(dimnames(SampPerGroup)[[1]][group], DE_Design[,DESIGN])
+				Check      <- sum(CPMdds[gene, sampleCols] >= MinCount) >= 0.75*SampPerGroup[group]
+				GroupsPass <- c(GroupsPass, Check)
+				if (Check == FALSE) {checkSpike <- c(checkSpike, Check)} else {
+					checkSpike <- c(checkSpike, ((max(Counts[gene, sampleCols]) - median(Counts[gene,sampleCols])) >=
+					                             (sum(Counts[gene, sampleCols]) / (SampPerGroup[group]+1))))
 				}
 			}
 			idx <- c(idx, as.logical(sum(GroupsPass)))
 			if (sum(checkSpike) >=1) {
-				FlagSpike<-rbind(FlagSpike, Counts[gene,])
-				NameRows<<-c(NameRows, row.names(Counts)[gene])
-				row.names(FlagSpike)<-NameRows 
+				FlagSpike <- rbind(FlagSpike, Counts[gene,])
+				NameRows  <<- c(NameRows, row.names(Counts)[gene])
+				row.names(FlagSpike) <- NameRows 
 			}
 		}
 
@@ -1390,7 +1395,7 @@ for(i in head(unique(genesToPlot$ensembl_gene_id), nBestFeatures)) {
 
 This section shows genes of interest sorted by those with highest fold-change within each contrast.
 
-```{r 'plot_genes_of_interest', fig.width=16, fig.height=12}
+```{r 'plot_genes_of_interest', fig.width=10, fig.height=6}
 
 #numResults=20
 numResults <- nBestFeatures
@@ -1427,7 +1432,7 @@ allResultsOrdered_logFC_filter %>%
 This section shows a volcano plot for each contrast.  
 Note that scales are set manually for this plot: therefore, there may be data points outside the range shown (see warnings).
 
-```{r 'volcano-plot', fig.width=16, fig.height=12, warning=TRUE, collapse=TRUE}
+```{r 'volcano-plot', fig.width=12, fig.height=6, warning=TRUE, collapse=TRUE}
 ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
   geom_point(size=0.1, alpha=0.5) +
   facet_wrap(~contrast, ncol=4) + # , scales="free"
@@ -1562,8 +1567,8 @@ names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
 foldChanges <- foldChanges %>% sort() %>% rev()
 foldChanges <- foldChanges[!is.na(names(foldChanges))]
 
-simplified_bp <- simplify(enrich_go_bp)
-cnetplot(simplified_bp, foldChange=foldChanges)
+simplified_bp <- simplify(enrich_go_bp, cutoff = 0.7, by = "p.adjust", select_fun = min)
+cnetplot(simplified_bp, foldChange=foldChanges, showCategory = 5, cex_label_gene=0.5)
 upsetplot(enrich_go_bp)
 heatplot(simplified_bp, foldChange=foldChanges)
 ```
@@ -1575,8 +1580,8 @@ clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
    theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 
-simplified_mf <- simplify(enrich_go_mf)
-cnetplot(simplified_mf, foldChange=foldChanges)
+simplified_mf <- simplify(enrich_go_mf, cutoff = 0.7, by = "p.adjust", select_fun = min)
+cnetplot(simplified_mf, foldChange=foldChanges, showCategory = 5, cex_label_gene=0.5)
 enrich_go_mf@result$Description <- stringr::str_trunc(enrich_go_mf@result$Description, width=30)
 upsetplot(enrich_go_mf)
 heatplot(simplified_mf, foldChange=foldChanges)
@@ -1591,7 +1596,7 @@ This is not displayed by default because the cellular component ontology does no
 #    theme(axis.text.y = element_text(angle = 0)) +
 #   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 
-# Causes
+# Causes an error...
 
 ```
 
