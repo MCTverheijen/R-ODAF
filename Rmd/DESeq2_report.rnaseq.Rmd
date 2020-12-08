@@ -244,6 +244,7 @@ DESeqDesign <- read.delim(SampleKeyFile,
                           quote="\"",
                           row.names=1) # Pick column that is used in ID; might be more appropriate to change this!
 DESeqDesign$original_names <- rownames(DESeqDesign)
+DESeqDesignAsRead <- DESeqDesign
 
 # Parameter-specified exclusions
 # Conditionally exclude contrasts and metadata that should be filtered
@@ -269,6 +270,9 @@ if(!is.null(params$exclude_groups)) {
   unique()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
 }
+if(!is.null(params$include_only_column) & !is.null(params$include_only_group)) {
+  DESeqDesign <- DESeqDesign %>% dplyr::filter((!!sym(params$include_only_column)) %in% params$include_only_group)
+}
 
 NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 
@@ -287,8 +291,18 @@ if (Platform=="RNA-Seq"){
   MinCount<- 0.5
   alpha <- pAdjValue<- 0.05 
   linear_fc_filter = 1.5
-} else { print("Platform/technology not recognized") }
-
+  # ADD MORE CODE HERE - NEED TO CONDITIONALLY SUM PROBES IN SAMPLE DATA!
+  biospyder <- read.delim("~/dbs/biospyder/191113_Human_S1500_Surrogate_2.0_Manifest.csv", # Assay manifest...
+                          stringsAsFactors=FALSE,
+                          sep="\t",
+                          header=TRUE,
+                          quote="\"")
+  # biospyder %>% select(ENSEMBL_GENE_ID) %>% distinct() %>% count()
+  biospyder_annos <- biospyder %>% select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL)
+  # sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,] # If aligned to hg38...
+} else { 
+  print("Platform/technology not recognized") 
+}
 
 ```
 
@@ -322,19 +336,6 @@ DESeqDesign <- DESeqDesign[(colnames(sampleData)),] # Reorder the metadata table
 DESeqDesign <- na.omit(DESeqDesign)
 sampleData <- sampleData[,(rownames(DESeqDesign))]
 samples_after <- nrow(DESeqDesign)
-
-# For TempO-Seq: Limit sampleData matrix to genes in the assay.
-if (Platform=="TempO-Seq") {
-  # ADD MORE CODE HERE - NEED TO CONDITIONALLY SUM PROBES IN SAMPLE DATA!
-biospyder <- read.delim("~/dbs/biospyder/191113_Human_S1500_Surrogate_2.0_Manifest.csv", # Assay manifest...
-                          stringsAsFactors=FALSE,
-                          sep="\t",
-                          header=TRUE,
-                          quote="\"")
-# biospyder %>% select(ENSEMBL_GENE_ID) %>% distinct() %>% count()
-biospyder_annos <- biospyder %>% select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL)
-# sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,] # If aligned to hg38...
-}
 
 head(rownames(DESeqDesign))
 head(colnames(sampleData)) # Output should match
@@ -398,18 +399,55 @@ The count matrix initially included `r initialSampleDataCount` samples (includin
 
 Following the removal of other samples (i.e., reference RNA, etc.), there were `r samples_after` samples remaining in the experiment. The samples excluded from analysis were named: `r paste(removed)`.    
 
-## Sample data (metadata about your experiment) 
+## Sample data (metadata about your experiment) {.tabset}
+
+### Samples used in this report
 
 This table shows the final list of samples that were used in the data analysis (as well as corresponding sample information as it was communicated to the Genomics Laboratory).  
 
-```{r print_metadata}
-# Feature to add: make this section a tabset - first tab includes samples that made it to analysis; second tab is samples exlcuded; third tab is all original metadata.
+```{r print_metadata_used}
 # Conditionally sort by dose if that column name is present?
 knitr::kable(DESeqDesign %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="User-provided information about samples and experimental conditions") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
   scroll_box(width = "720px")
+
+knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
+             row.names = F,
+             caption="Number of samples in each experimental group")
+```
+
+### Samples removed from this report
+
+```{r print_metadata_removed}
+# Conditionally sort by dose if that column name is present?
+knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)) %>% dplyr::filter(original_names %in% removed),
+             row.names =  F,
+             caption="User-provided information about samples and experimental conditions") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
+  scroll_box(width = "720px")
+
+knitr::kable(DESeqDesignAsRead %>%
+               dplyr::filter(original_names %in% removed) %>%
+               group_by(!!sym(params$design)) %>% tally(),
+             row.names = F,
+             caption="Number of samples removed from each experimental group")
+```
+
+### Original sample metadata as provided
+
+```{r print_metadata_provided}
+# Conditionally sort by dose if that column name is present?
+knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)),
+             row.names =  F,
+             caption="User-provided information about samples and experimental conditions") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
+  scroll_box(width = "720px")
+
+knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
+             row.names = F,
+             caption="Number of samples in each experimental group")
 ```
 
 ## Load R-ODAF functions
@@ -723,7 +761,7 @@ colPositionsOfData <- ncol(CPMddsDF) - numColsToPrepend
 CPMddsDF <- CPMddsDF[,c(1,colPositionsToPrependSTART:ncol(CPMddsDF),2:colPositionsOfData)]
 ```
 
-The code above (not shown by default) generates tables summarzing the differentially expressed genes (DEGs).  
+The code above (not shown by default) generates tables summarizing the differentially expressed genes (DEGs).  A linear fold change cutoff of `r linear_fc_filter` and adjusted p-value of `r alpha` was used to filter the results.
 
 Here is the number of DEGs in each group:
 
@@ -878,7 +916,6 @@ setColWidths(wb4, sheet = 1, cols = 1:ncol(CPMddsDF), widths = "auto")
 saveWorkbook(wb4, paste0("4.",NORM_TYPE,"-CPM.xlsx"), overwrite = TRUE)
 ```
 
-
 The code above (not shown by default) writes Excel workbooks and text files of DEG lists.
 
 These files should be provided to you as a separate zip file.
@@ -965,7 +1002,7 @@ This plot shows the principal components analysis limited to all DEGs. In this c
 
 ```{r 'sampleDist'}
 ## Obtain the sample euclidean distances
-sampleDists <- dist(t(assay(rld)))
+sampleDists <- stats::dist(t(assay(rld)))
 sampleDistMatrix <- as.matrix(sampleDists)
 ## Add names based on intgroup
 rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, params$design]), 1,
@@ -991,7 +1028,7 @@ This plot shows how samples are clustered based on their euclidean distance usin
 # select = order(rv, decreasing = TRUE)[1:nBest]
 ## Obtain the sample euclidean distances
 # sampleDistsTop <- dist(t(assay(rld)[select,]))
-sampleDistsDEGs <- dist(t(assay(rld_degs)))
+sampleDistsDEGs <- stats::dist(t(assay(rld_degs)))
 # sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 sampleDistMatrixDEGs <- as.matrix(sampleDistsDEGs)
 
@@ -1018,7 +1055,7 @@ This plot shows how samples are clustered based on their euclidean distance usin
 ## Limit to the top n genes
 ## Using the select object from PCA code above...
 ## Obtain the sample euclidean distances
-sampleDistsTop <- dist(t(assay(rld)[select,]))
+sampleDistsTop <- stats::dist(t(assay(rld)[select,]))
 sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 
 ## Add names based on intgroup
@@ -1384,7 +1421,7 @@ plotCounts_gg <- function(i, dds, intgroup) {
 genesToPlot <- significantResults %>% arrange(-abs(log2FoldChange))
 
 for(i in head(unique(genesToPlot$ensembl_gene_id), nBestFeatures)) {
-    print(plotCounts_gg(i, dds = dds, intgroup = params$intgroup))
+  print(plotCounts_gg(i, dds = dds, intgroup = params$intgroup))
 }
 
 ```
@@ -1452,7 +1489,7 @@ ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
 bmdexpress <- as.data.frame(assay(rld))
 bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
 bmdexpress <- rbind( Dose=c("#CLASS:DOSE",as.numeric(DESeqDesign$dose)), bmdexpress, stringsAsFactors=F)
-write.table(bmdexpress, file = "./DEG_output/bmdexpress_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+write.table(bmdexpress, file=file.path(paths$DEG_output, "bmdexpress_input.txt"), quote = F, sep = "\t", row.names = F, col.names = T)
 
 fastbmd <- as.data.frame(assay(dds))
 fastbmd <- cbind(SampleID=row.names(fastbmd), fastbmd, stringsAsFactors=F)
@@ -1462,13 +1499,13 @@ fastbmd <- rbind( Chemical=c("#CLASS:CHEMICAL",as.character(DESeqDesign[DESeqDes
 fastbmd <- rbind( Dose=c("#CLASS:DOSE",format(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$dose, scientific=F)),
                   fastbmd,
                   stringsAsFactors=F)
-write.table(fastbmd, file = "./DEG_output/fastbmd_input.txt", quote = F, sep = "\t", row.names = F, col.names = T)
+write.table(fastbmd, file=file.path(paths$DEG_output, "fastbmd_input.txt"), quote = F, sep = "\t", row.names = F, col.names = T)
 
 ```
 
 # GO Enrichment Analysis {.tabset}
 
-This section performs GO enrichment on **all DEGs passing filters**.
+This section performs GO enrichment on **all DEGs passing filters**. The background set of genes is those that were identified in this sequencing experiment. The [clusterProfiler](https://bioconductor.org/packages/release/bioc/html/clusterProfiler.html) package is used for this analysis.
 
 ```{r cluster-profiler, warning=FALSE, message=FALSE, collapse=TRUE}
 ## Remember that dds had ENSEMBL ids for the genes
@@ -1566,9 +1603,24 @@ foldChanges <- foldChanges %>% sort() %>% rev()
 foldChanges <- foldChanges[!is.na(names(foldChanges))]
 
 simplified_bp <- simplify(enrich_go_bp, cutoff = 0.7, by = "p.adjust", select_fun = min)
-cnetplot(simplified_bp, foldChange=foldChanges, showCategory = 5, cex_label_gene=0.5)
+# I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
+# Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
+simplified_bp_filt <- simplified_bp %>%
+    filter(p.adjust < .05, qvalue < 0.05) %>%
+    mutate(GeneRatio = DOSE::parse_ratio(GeneRatio)) %>%
+    arrange(desc(GeneRatio))
+
+show3 <- simplified_bp_filt$Description[1:3] # Top 3
+show5 <- simplified_bp_filt$Description[1:5] # Top 5
+show10 <- simplified_bp_filt$Description[1:10] # Top 10
+
+cnetplot(simplified_bp,
+         foldChange=foldChanges,
+         showCategory = show3,
+         cex_label_gene=0.5)
+
 upsetplot(enrich_go_bp)
-heatplot(simplified_bp, foldChange=foldChanges)
+heatplot(simplified_bp, foldChange=foldChanges, showCategory = show10)
 ```
 
 ## Molecular Functions
@@ -1598,9 +1650,11 @@ This is not displayed by default because the cellular component ontology does no
 
 ```
 
-# Pathway Analysis using WikiPathways and GSEA (KEGG)
+# Pathway Analysis using Enriched WikiPathways and GSEA (KEGG)
 
-## WikiPathways: All DEGs
+## WikiPathways: Enrichment based on all DEGs
+
+This section uses clusterProfiler to detect enriched gene sets using [WikiPathways](https://www.wikipathways.org/) data.
 
 ```{r 'pathway_analysis', collapse=TRUE}
 entrez_IDs <- as.character(id_table_entrez$entrezgene_id)
@@ -1631,7 +1685,9 @@ clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 ```
 
-## WikiPathways: By contrast {.tabset}
+## WikiPathways: Enrichment by contrast {.tabset}
+
+This section uses clusterProfiler `enricher()` to detect enriched gene sets using [WikiPathways](https://www.wikipathways.org/) data.
 
 ```{r 'pathway_analysis_by_contrast_make_plots', collapse=TRUE}
 plotList <- list()
@@ -1658,13 +1714,15 @@ for (i in 1:length(levels(significantResults$contrast))) {
 ```{r 'pathway_analysis_by_contrast_print_plots', results='asis'}
 for (i in 1:length(levels(significantResults$contrast))) {
   cat("###", levels(significantResults$contrast)[i], " \n")
-  print(plotList[[i]])
+  if(!is.null(plotList[[i]])) {print(plotList[[i]])} else {print("No pathway perturbations were detected within this contrast.")}
   cat('\n\n')
 }
 
 ```
 
 ## GSEA: By contrast {.tabset}
+
+This section uses clusterProfiler `gseKEGG()` to detect enriched KEGG pathways.
 
 ```{r 'gsea_analysis_by_contrast_make_plots', collapse=TRUE}
 plotListGSEA <- list()
@@ -1678,16 +1736,21 @@ foldChanges <- foldChanges %>% sort() %>% rev()
 foldChanges <- foldChanges[!is.na(names(foldChanges))]
 if (length(foldChanges) < 10) {next}
 kk <- gseKEGG(foldChanges, keyType="ncbi-geneid", organism=kegg_organism)
-if(dim(kk@result)[1] > 0){plotListGSEA[[i]] <- ridgeplot(kk)} else {plotListGSEA[[i]] <- "No results"}
+if(dim(kk@result)[1] > 0){plotListGSEA[[i]] <- ridgeplot(kk)} else {plotListGSEA[[i]] <- NULL}
 }
 ```
 
 ```{r 'gsea_analysis_by_contrast_print_plots', results='asis'}
 for (i in 1:length(levels(significantResults$contrast))) {
   cat("###", levels(significantResults$contrast)[i], " \n")
-  print(plotListGSEA[[i]])
+  if(!is.null(plotListGSEA[[i]])) {print(plotListGSEA[[i]])} else {print("No pathway perturbations were detected within this contrast.")}
   cat('\n\n')
 }
+```
+
+```{r 'gsego'}
+# test <- clusterProfiler::gseGO(foldChanges, OrgDb = orgdb)
+# gseaplot2(test)
 ```
 
 # Session Info
