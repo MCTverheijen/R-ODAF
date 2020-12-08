@@ -21,6 +21,7 @@ params:
   exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: ["f2","m2"] # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
+  cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
 ---
 
 ***
@@ -119,6 +120,7 @@ library('BiocParallel')
 library('clusterProfiler')
 library('biomaRt')
 library('AnnotationHub')
+library('vsn')
 
 # Load genome, depends on species
 # To add: Zebrafish, Folsomia candida, others?
@@ -270,10 +272,23 @@ if(!is.null(params$exclude_groups)) {
 
 NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 
+# Create directories
 plotdir <- paste(paths$DEG_output, "/plots/", sep="")
 if(!dir.exists(plotdir)) {dir.create(plotdir)}
 barplot.dir <- paste(plotdir, "/barplot_genes/", sep="")
 if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
+
+#Set parameters according to platform
+if (Platform=="RNA-Seq"){
+  MinCount <- 1
+  alpha <- pAdjValue <- 0.05 # Relaxed from 0.01
+  linear_fc_filter = 1.5
+} else if (Platform=="TempO-Seq") {
+  MinCount<- 0.5
+  alpha <- pAdjValue<- 0.05 
+  linear_fc_filter = 1.5
+} else { print("Platform/technology not recognized") }
+
 
 ```
 
@@ -345,7 +360,7 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_face
                                     design = formula(paste("~", DESIGN)) ) # replace with intgroups if you have a good reason to
       dds <- dds[,rownames(DESeqDesign)]
       dds <- dds[rowSums(counts(dds)) > 1]
-      dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(39))
+      dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(params$cpus))
       if(is.null(params$group_facet)) {
         save(dds, file=file.path(paths$RData, "dds.RData"))
       } else {
@@ -365,17 +380,6 @@ head(colData(dds))
 head(assay(dds))
 head(rowRanges(dds))
 str(counts(dds))
-
-#Set parameters according to platform
-if (Platform=="RNA-Seq"){
-  MinCount<- 1
-  alpha <- pAdjValue <- 0.05 # Relaxed from 0.01
-  linear_fc_filter = 1.5
-} else if (Platform=="TempO-Seq") {
-  MinCount<- 0.5
-  alpha <- pAdjValue<- 0.05 
-  linear_fc_filter = 1.5
-} else { print("Platform/technology not recognized") }
 
 # Make regularized log object for later plotting
 #rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
@@ -1696,21 +1700,21 @@ for (i in 1:length(levels(significantResults$contrast))) {
 
 # Session Info
 
-Date the report was generated.
+## Date the report was generated.
 
 ```{r reproducibility1, echo=FALSE}
 ## Date the report was generated
 Sys.time()
 ```
 
-Parameters (from the list elements for each params${whatever}) used to generate this report.
+## Parameters (from the list elements for each params${whatever}) used to generate this report.
 
 ```{r paramsList, echo=FALSE}
-knitr::kable(as.data.frame(unlist(params)))
+knitr::kable(as.data.frame(unlist(params)), format="markdown")
 ```
 
 
-Wallclock time spent generating the report.
+## Wallclock time spent generating the report.
 
 ```{r reproducibility2, echo=FALSE}
 ## Processing time in seconds
@@ -1718,7 +1722,7 @@ totalTime <- diff(c(startTime, Sys.time()))
 round(totalTime, digits=3)
 ```
 
-`R` session information.
+## `R` session information.
 
 ```{r reproducibility3, echo=FALSE}
 ## Session info
@@ -1726,7 +1730,7 @@ options(width = 120)
 session_info()
 ```
 
-Pandoc version used: `r rmarkdown::pandoc_version()`.
+## Pandoc version used: `r rmarkdown::pandoc_version()`.
 
 ```{r 'save_final', show=FALSE}
 # Save complete workspace
