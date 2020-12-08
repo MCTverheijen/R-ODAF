@@ -1204,7 +1204,6 @@ cat('\n\n')
 
 ```
 
-
 ## Filtered at `r metadata(resList[[1]])$alpha / 2` {.tabset}
 
 This second group of MA plots uses `alpha` = `r metadata(resList[[1]])$alpha / 2` and can be used against the first MA plot to identify features which have adjusted p-values between `r metadata(resList[[1]])$alpha / 2` and `r metadata(resList[[1]])$alpha`.
@@ -1222,7 +1221,6 @@ cat('\n\n')
 }
 
 ```
-
 
 ## Top `r min(nBest, nrow(head(res.df, n = nBest)))` features {.tabset}
 
@@ -1268,7 +1266,6 @@ summary(allResults$pvalue)
 
 This is the numerical summary of the distribution of the p-values.
 
-
 ```{r pvalueTable, results = 'asis'}
 ## Split features by different p-value cutoffs
 pval_table <- lapply(c(1e-04, 0.001, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5,
@@ -1302,7 +1299,6 @@ summary(res.df$padj)
 
 This is the numerical summary of the distribution of the `r elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)]`.
 
-
 ```{r padjTable, results = 'asis'}
 ## Split features by different adjusted p-value cutoffs
 padj_table <- lapply(c(1e-04, 0.001, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5,
@@ -1314,7 +1310,6 @@ kable(padj_table, format = 'markdown', align = c('c', 'c'))
 ```
 
 This table shows the number of features with `r elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)]` less or equal than some commonly used cutoff values. 
-
 
 # Tables of top features
 
@@ -1367,11 +1362,9 @@ DT::datatable(res.df.dt,
 
 ```
 
-
 # Gene-level plots for top `r nBestFeatures` features
 
 This section contains plots showing the normalized counts per sample for each group of interest. Only the best `r nBestFeatures` features are shown, ranked by their absolute fold change values. The Y axis is on the log10 scale and the feature name is shown in the title of each plot.
-
 
 ```{r 'plotCounts'}
 plotCounts_gg <- function(i, dds, intgroup) {
@@ -1662,7 +1655,6 @@ for (i in 1:length(levels(significantResults$contrast))) {
 }
 ```
 
-
 ```{r 'pathway_analysis_by_contrast_print_plots', results='asis'}
 for (i in 1:length(levels(significantResults$contrast))) {
   cat("###", levels(significantResults$contrast)[i], " \n")
@@ -1712,7 +1704,6 @@ Sys.time()
 ```{r paramsList, echo=FALSE}
 knitr::kable(as.data.frame(unlist(params)), format="markdown")
 ```
-
 
 ## Wallclock time spent generating the report.
 
