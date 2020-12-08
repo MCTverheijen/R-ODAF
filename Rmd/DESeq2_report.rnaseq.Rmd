@@ -195,7 +195,7 @@ SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
 # B. Tab delimited sample information file with at least 2 columns:
   # 1. sample names identical to the column names of sampleData
   # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
-SampleKeyFile <- file.path(paths$metadata,"metadata.txt")
+SampleKeyFile <- file.path(paths$metadata,"metadata.fixed.txt")
 # C. Tab delimited file of comparisons (contrasts) to test 
 # Group of interest in the left column, control for comparison in the right column
 ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
@@ -403,7 +403,7 @@ Following the removal of other samples (i.e., reference RNA, etc.), there were `
 
 ### Samples used in this report
 
-This table shows the final list of samples that were used in the data analysis (as well as corresponding sample information as it was communicated to the Genomics Laboratory).  
+This table shows the final list of samples that were used in the data analysis (as well as the corresponding sample information, e.g., experimental groups).  
 
 ```{r print_metadata_used}
 # Conditionally sort by dose if that column name is present?
@@ -420,11 +420,13 @@ knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
 
 ### Samples removed from this report
 
+This table shows the samples that were removed from this analysis.
+
 ```{r print_metadata_removed}
 # Conditionally sort by dose if that column name is present?
 knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)) %>% dplyr::filter(original_names %in% removed),
              row.names =  F,
-             caption="User-provided information about samples and experimental conditions") %>%
+             caption="Samples removed from analysis") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
   scroll_box(width = "720px")
 
@@ -437,11 +439,13 @@ knitr::kable(DESeqDesignAsRead %>%
 
 ### Original sample metadata as provided
 
+This table shows the original sample metadata including any samples that were removed within this report.
+
 ```{r print_metadata_provided}
 # Conditionally sort by dose if that column name is present?
 knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)),
              row.names =  F,
-             caption="User-provided information about samples and experimental conditions") %>%
+             caption="Complete sample metadata as provided to the Genomics Laboratory.") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
   scroll_box(width = "720px")
 
