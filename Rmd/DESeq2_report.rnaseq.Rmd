@@ -195,7 +195,7 @@ SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
 # B. Tab delimited sample information file with at least 2 columns:
   # 1. sample names identical to the column names of sampleData
   # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
-SampleKeyFile <- file.path(paths$metadata,"metadata.fixed.txt")
+SampleKeyFile <- file.path(paths$metadata,"metadata.txt")
 # C. Tab delimited file of comparisons (contrasts) to test 
 # Group of interest in the left column, control for comparison in the right column
 ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
