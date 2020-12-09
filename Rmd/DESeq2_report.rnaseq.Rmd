@@ -16,10 +16,10 @@ params:
   intgroup: "group"           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: NULL          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: NULL           # Which group will this report be done on?
+  group_facet: !r NA             # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: !r NA            # Which group will this report be done on?
   exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
-  exclude_groups: "f2" # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
+  exclude_groups: "female_2" # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: "group" # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
   include_only_group: ["male_0","male_2"] # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
@@ -61,7 +61,7 @@ paths$output <- paste0(paths$data, "/output")
 paths$processed <- paste0(paths$data, "/processed")
 paths$metadata <- paste0(paths$root, "/metadata")
 paths$reports <- paste0(paths$root, "/reports")
-if(is.null(params$group_facet)) {
+if(is.na(params$group_facet)) {
   paths$DEG_output <- paste0(paths$root, "/DEG_output")
 } else {
   paths$DEG_output <- paste0(paths$root, "/DEG_output/group_", params$group_filter)
@@ -263,8 +263,8 @@ DESeqDesignAsRead <- DESeqDesign
 # Conditionally exclude contrasts and metadata that should be filtered
 # 1. Filter by group filter - useful for selecting one treatment at a time. params$group_filter
 # 2. Filter manually - useful for removing irrelevant control groups (e.g. reference RNA). params$exclude_groups
-# Note that these should only be run if the repsective variables are set.
-if(!is.null(params$group_facet)) {
+# Note that these should only be run if the respective variables are set.
+if(!is.na(params$group_facet)) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$group_facet)==params$group_filter)
   contrasts_to_filter <- DESeqDesign %>%
   dplyr::filter(!!sym(params$group_facet)==params$group_filter) %>%
@@ -272,10 +272,10 @@ if(!is.null(params$group_facet)) {
   unique()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
 }
-if(!is.null(params$exclude_samples)) {
+if(any(!is.na(params$exclude_samples))) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!original_names %in% params$exclude_samples)
 }
-if(!is.null(params$exclude_groups)) {
+if(any(!is.na(params$exclude_groups))) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!(!!sym(params$design)) %in% params$exclude_groups)
   contrasts_to_filter <- DESeqDesign %>% 
   dplyr::filter(!(!!sym(params$design)) %in% params$exclude_groups) %>%
@@ -283,7 +283,7 @@ if(!is.null(params$exclude_groups)) {
   unique()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
 }
-if(!is.null(params$include_only_column) & !is.null(params$include_only_group)) {
+if(!is.na(params$include_only_column) & !is.na(params$include_only_group)) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter((!!sym(params$include_only_column)) %in% params$include_only_group)
   contrasts <- contrasts %>% dplyr::filter(V1 %in% params$include_only_group)
 }
@@ -350,9 +350,11 @@ samples_before <- nrow(DESeqDesign)
 # Sanity check: each sample (row) in the metadata should have a corresponding column in the count data
 metadata_in_sampledata <- all(rownames(DESeqDesign) %in% colnames(sampleData))
 # Sanity check: each column in the count data should have a corresponding sample (row) in the metadata
-sampledata_in_metadata <- all(colnames(sampleData) %in% rownames(DESeqDesign)) 
+sampledata_in_metadata <- all(colnames(sampleData) %in% rownames(DESeqDesign))
+# Find samples that were removed because they weren't in metadata
 removed <- colnames(sampleData[which(!colnames(sampleData) %in% rownames(DESeqDesign))])
-DESeqDesign <- DESeqDesign[(colnames(sampleData)),] # Reorder the metadata table to correspond to the order of columns in the count data
+# Reorder the metadata table to correspond to the order of columns in the count data
+DESeqDesign <- DESeqDesign[(colnames(sampleData)),]
 DESeqDesign <- na.omit(DESeqDesign)
 sampleData <- sampleData[,(rownames(DESeqDesign))]
 samples_after <- nrow(DESeqDesign)
@@ -363,9 +365,9 @@ head(colnames(sampleData)) # Output should match
 intgroups <- params$intgroup
 # Intgroups need to be factors for DESeq2
 DESeqDesign[intgroups] <- lapply(DESeqDesign[intgroups], factor)
-if(!is.null(params$group)) { DESeqDesign[params$group] <- as.factor(DESeqDesign[params$group]) }
+if(!is.na(params$design)) { DESeqDesign[params$design] <- factor(DESeqDesign[,params$design]) }
 
-if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_facet) & params$use_cached_RData == TRUE) {
+if (file.exists(file.path(paths$RData, "dds.RData")) & is.na(params$group_facet) & params$use_cached_RData == TRUE) {
   print(paste("Already found DESeq2 object from previous run; loading from disk."))
   load(file.path(paths$RData,"dds.RData"))
   if (!identical(as.data.frame(round(counts(dds))),
@@ -373,7 +375,7 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_face
     print("Not identical")
     }
   } else {
-    if(file.exists(file.path(paths$RData, paste0("dds_", params$group_filter, ".RData"))) & !is.null(params$group_facet) & params$use_cached_RData == TRUE) {
+    if(file.exists(file.path(paths$RData, paste0("dds_", params$group_filter, ".RData"))) & !is.na(params$group_facet) & params$use_cached_RData == TRUE) {
       load(file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
       } else {
       dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
@@ -382,7 +384,7 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.null(params$group_face
       dds <- dds[,rownames(DESeqDesign)]
       dds <- dds[rowSums(counts(dds)) > 1]
       dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(params$cpus))
-      if(is.null(params$group_facet)) {
+      if(is.na(params$group_facet)) {
         save(dds, file=file.path(paths$RData, "dds.RData"))
       } else {
         save(dds, file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
@@ -429,7 +431,7 @@ This table shows the final list of samples that were used in the data analysis (
 # Conditionally sort by dose if that column name is present
 if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
   doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
-  knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% arrange(doseCol),
+  knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% arrange(doseCol, .by_group = T),
              row.names =  F,
              caption="Samples and corresponding experimental conditions used in this report") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
@@ -441,8 +443,6 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
   scroll_box(width = "720px")
 }
-
-
 
 knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
@@ -457,7 +457,7 @@ This table shows the samples that were removed from this analysis.
 
 ```{r print_metadata_removed}
 # Conditionally sort by dose if that column name is present?
-knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)) %>% dplyr::filter(original_names %in% removed),
+knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)) %>% dplyr::filter(!original_names %in% DESeqDesign$original_names),
              row.names =  F,
              caption="Samples removed from analysis") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
@@ -962,7 +962,7 @@ saveWorkbook(wb4, paste0("4.",NORM_TYPE,"-CPM.xlsx"), overwrite = TRUE)
 ### IPA
 wb5 <- createWorkbook()
 modifyBaseFont(wb5, fontSize = 10, fontName = "Arial Narrow")
-addWorksheet(wb5, "Counts per million")
+addWorksheet(wb5, "For IPA upload")
 freezePane(wb5, sheet = 1, firstRow = TRUE, firstActiveCol = 5)
 writeDataTable(wb5,
                sheet = 1,
@@ -973,7 +973,7 @@ writeDataTable(wb5,
                headerStyle = hs1,
                keepNA = T,
                na.string = "NA")
-setColWidths(wb5, sheet = 1, cols = 1:ncol(CPMddsDF), widths = "auto")
+setColWidths(wb5, sheet = 1, cols = 1:ncol(IPA), widths = "auto")
 saveWorkbook(wb5, paste0("5.",NORM_TYPE,"-IPA.xlsx"), overwrite = TRUE)
 
 ```
@@ -999,7 +999,7 @@ xfun::embed_dir(ODAFdir, name = "RNASeq_R-ODAF_text_files.zip")
 
 ```{r 'save_point', show=FALSE, eval=flag}
 # Save RData here if flag is TRUE.
-if(is.null(params$group_facet)) {
+if(is.na(params$group_facet)) {
   save.image(file = file.path(paths$RData, "Partial_analysis.RData"))
 } else {
   save.image(file = file.path(paths$RData, paste0("Partial_analysis_", params$group_filter, ".RData")))
@@ -1784,7 +1784,10 @@ for (i in 1:length(levels(significantResults$contrast))) {
                                  id_table_entrez,
                                  by="ensembl_gene_id")
   entrezDEGs <- entrezDEGs$entrezgene_id
-  if (length(entrezDEGs)<10) { next }
+  if (length(entrezDEGs)<10) {
+    plotList[[i]] <- NA
+    next
+  }
   DEG_pathways <- clusterProfiler::enricher(
           entrezDEGs,
           universe = entrez_IDs,
@@ -1802,7 +1805,7 @@ for (i in 1:length(levels(significantResults$contrast))) {
 ```{r 'pathway_analysis_by_contrast_print_plots', results='asis'}
 for (i in 1:length(levels(significantResults$contrast))) {
   cat("###", levels(significantResults$contrast)[i], " \n")
-  if(!is.null(plotList[[i]])) {print(plotList[[i]])} else {print("No pathway perturbations were detected within this contrast.")}
+  if(!is.na(plotList[[i]])) {print(plotList[[i]])} else {print("No pathway perturbations were detected within this contrast.")}
   cat('\n\n')
 }
 
@@ -1867,6 +1870,7 @@ for (i in 1:length(levels(significantResults$contrast))) {
   cat('\n\n')
 }
 ```
+
 # Methods Summary
 
 Please use this as a starting point for the bioinformatics/statistics section of any publications based on the data analyzed in this report. All of the information provided here is contained elsewhere in the report, but it is aggregated here for your convenience.  
@@ -1908,7 +1912,7 @@ session_info()
 
 ```{r 'save_final', show=FALSE}
 # Save complete workspace
-if(is.null(params$group_facet)) {
+if(is.na(params$group_facet)) {
   save.image(file = file.path(paths$RData, "Complete_analysis.RData"))
 } else {
   save.image(file = file.path(paths$RData, paste0("Complete_analysis_", params$group_filter, ".RData")))
