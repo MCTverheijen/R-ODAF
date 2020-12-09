@@ -19,7 +19,7 @@ params:
   group_facet: NULL          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
   group_filter: NULL           # Which group will this report be done on?
   exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
-  exclude_groups: ["f2","m2"] # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
+  exclude_groups: "f2" # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
 ---
@@ -403,19 +403,20 @@ Following the removal of other samples (i.e., reference RNA, etc.), there were `
 
 ### Samples used in this report
 
-This table shows the final list of samples that were used in the data analysis (as well as the corresponding sample information, e.g., experimental groups).  
+This table shows the final list of samples that were used in the data analysis (as well as the corresponding sample information, e.g., to which experimental group samples belong).  
 
 ```{r print_metadata_used}
 # Conditionally sort by dose if that column name is present?
 knitr::kable(DESeqDesign %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="User-provided information about samples and experimental conditions") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
   scroll_box(width = "720px")
 
 knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
-             caption="Number of samples in each experimental group")
+             caption="Number of samples in each experimental group") %>%
+  kable_styling(bootstrap_options = "striped", full_width = T, position = "left")
 ```
 
 ### Samples removed from this report
@@ -427,14 +428,15 @@ This table shows the samples that were removed from this analysis.
 knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)) %>% dplyr::filter(original_names %in% removed),
              row.names =  F,
              caption="Samples removed from analysis") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
   scroll_box(width = "720px")
 
 knitr::kable(DESeqDesignAsRead %>%
                dplyr::filter(original_names %in% removed) %>%
                group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
-             caption="Number of samples removed from each experimental group")
+             caption="Number of samples removed from each experimental group") %>%
+  kable_styling(bootstrap_options = "striped", full_width = T, position = "left")
 ```
 
 ### Original sample metadata as provided
@@ -446,12 +448,13 @@ This table shows the original sample metadata including any samples that were re
 knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="Complete sample metadata as provided to the Genomics Laboratory.") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))  %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
   scroll_box(width = "720px")
 
 knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
-             caption="Number of samples in each experimental group")
+             caption="Number of samples in each experimental group") %>%
+  kable_styling(bootstrap_options = "striped", full_width = T, position = "left")
 ```
 
 ## Load R-ODAF functions
@@ -1592,7 +1595,7 @@ enrich_go_mf <- enrichGO(gene = myDEGs,
 
 ## Biological processes
 
-```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
+```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
 clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
   theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
@@ -1607,6 +1610,8 @@ foldChanges <- foldChanges %>% sort() %>% rev()
 foldChanges <- foldChanges[!is.na(names(foldChanges))]
 
 simplified_bp <- simplify(enrich_go_bp, cutoff = 0.7, by = "p.adjust", select_fun = min)
+# Max size of gene set... useful for visualizing networks
+simplified_bp_for_network <- simplified_bp %>% gsfilter(by="GSSize", max=400)
 # I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
 # Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
 simplified_bp_filt <- simplified_bp %>%
@@ -1618,10 +1623,10 @@ show3 <- simplified_bp_filt$Description[1:3] # Top 3
 show5 <- simplified_bp_filt$Description[1:5] # Top 5
 show10 <- simplified_bp_filt$Description[1:10] # Top 10
 
-cnetplot(simplified_bp,
+cnetplot(simplified_bp_for_network,
          foldChange=foldChanges,
-         showCategory = show3,
-         cex_label_gene=0.5)
+         showCategory = show10,
+         cex_label_gene=0.3)
 
 upsetplot(enrich_go_bp)
 heatplot(simplified_bp, foldChange=foldChanges, showCategory = show10)
@@ -1629,23 +1634,39 @@ heatplot(simplified_bp, foldChange=foldChanges, showCategory = show10)
 
 ## Molecular Functions
 
-```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
+```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
 clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
    theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 
 simplified_mf <- simplify(enrich_go_mf, cutoff = 0.7, by = "p.adjust", select_fun = min)
-cnetplot(simplified_mf, foldChange=foldChanges, showCategory = 5, cex_label_gene=0.5)
-enrich_go_mf@result$Description <- stringr::str_trunc(enrich_go_mf@result$Description, width=30)
+# Max size of gene set... useful for visualizing networks
+simplified_mf_for_network <- simplified_mf %>% gsfilter(by="GSSize", max=400)
+# I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
+# Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
+simplified_mf_filt <- simplified_mf %>%
+    filter(p.adjust < .05, qvalue < 0.05) %>%
+    mutate(GeneRatio = DOSE::parse_ratio(GeneRatio)) %>%
+    arrange(desc(GeneRatio))
+
+show3 <- simplified_mf_filt$Description[1:3] # Top 3
+show5 <- simplified_mf_filt$Description[1:5] # Top 5
+show10 <- simplified_mf_filt$Description[1:10] # Top 10
+
+cnetplot(simplified_mf_for_network,
+         foldChange=foldChanges,
+         showCategory = show10,
+         cex_label_gene=0.3)
+
 upsetplot(enrich_go_mf)
-heatplot(simplified_mf, foldChange=foldChanges)
+heatplot(simplified_mf, foldChange=foldChanges, showCategory = show10)
 ```
 
 ## Cellular Component
 
 This is not displayed by default because the cellular component ontology does not always have statistically significant enriched  genes. If you are expecting to see results here, the analysis can be repeated.  
 
-```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=10, collapse=TRUE}
+```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
 # clusterProfiler::dotplot(enrich_go_all %>% filter(ONTOLOGY=="CC"), font.size=9, c="BgRatio")  +
 #    theme(axis.text.y = element_text(angle = 0)) +
 #   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
@@ -1689,7 +1710,7 @@ clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
 ```
 
-## WikiPathways: Enrichment by contrast {.tabset}
+## WikiPathways: Enrichment by DEGs within each contrast {.tabset}
 
 This section uses clusterProfiler `enricher()` to detect enriched gene sets using [WikiPathways](https://www.wikipathways.org/) data.
 
