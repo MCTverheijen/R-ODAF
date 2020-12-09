@@ -1,6 +1,4 @@
-m2	m0
-m1k	m0
-m5k	m0
-f2	f0
-f1k	f0
-f5k	f0
+5D.WT.TCDD	5D.WT.CO
+5D.KO.CO	5D.WT.CO
+5D.KO.TCDD	5D.KO.CO
+5D.KO.TCDD	5D.WT.TCDD
