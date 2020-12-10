@@ -10,18 +10,19 @@ output:
     code_folding: hide
     theme: spacelab           # flatly spacelab sandstone cerulean
 params:
-  projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash. We try to avoid requiring it though!
+  projectdir: !r here::here() # Can hard code if for some reason you need that
+  project_name: "Example"     # Change depending on your project name
   species: rat                # one of human, mouse, rat, hamster
-  design: "Group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["Group","Genotype","Treatment"]           # experimental group of interest plus covariates; can be more than one
+  design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
+  intgroup: ["group","sex","dose"]           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: NULL          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: NULL           # Which group will this report be done on?
+  group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: !r NA           # Which group will this report be done on?
   exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
-  exclude_groups: ["f2","m2"] # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
-  include_only_column: "Timepoint" # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
-  include_only_group: "5D" # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
+  exclude_groups: "female_2" # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
+  include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
+  include_only_group: !r NA # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
 ---
@@ -190,8 +191,8 @@ The code above (not shown by default) loads the relevant R packages required for
 #
 # Set file locations
 if(!dir.exists(paths$DEG_output)){
-  dir.create(paths$DEG_output)
-  dir.create(paths$RData)
+  dir.create(paths$DEG_output, recursive = TRUE)
+  dir.create(paths$RData, recursive = TRUE)
   }
 
 # FILES TO LOAD
@@ -218,9 +219,15 @@ nHeatmap <- 50 # Number of most variable genes for heatmap
 nHeatmapDEGs <- 50 # Number of DEGs for heatmap
 
 # Set analysis ID. This ID will be used as prefix for the output files
-analysisID <-"2020_DEFAULT"
+# Normally, as follows: year - project_name - group_filter
+if(is.na(params$group_filter)){
+  analysisID <- paste(format(Sys.time(), '%Y'), params$project_name, sep="_")
+} else {
+  analysisID <- paste(format(Sys.time(), '%Y'), params$project_name, params$group_filter, sep="_")
+}
 # Specify used platform/technology for data generation:
 Platform <- params$platform # Should be one of "RNA-Seq" or "TempO-Seq"
+NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 
 # Misc parameters
 digits = 2 # For rounding numbers
@@ -289,13 +296,11 @@ if(!is.na(params$include_only_column) & !is.na(params$include_only_group)) {
   contrasts <- contrasts %>% dplyr::filter(V1 %in% limit_contrasts)
 }
 
-NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
-
 # Create directories
 plotdir <- paste(paths$DEG_output, "/plots/", sep="")
-if(!dir.exists(plotdir)) {dir.create(plotdir)}
+if(!dir.exists(plotdir)) {dir.create(plotdir, recursive = TRUE)}
 barplot.dir <- paste(plotdir, "/barplot_genes/", sep="")
-if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
+if(!dir.exists(barplot.dir)) {dir.create(barplot.dir, recursive = TRUE)}
 
 #Set parameters according to platform
 if (Platform=="RNA-Seq"){
@@ -605,7 +610,7 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	                 type="ashr")
 	#Make new directory for the ODAF-specific files
 	ODAFdir <- file.path(paths$DEG_output, "R-ODAF")
-	if(!dir.exists(ODAFdir)) {dir.create(ODAFdir)}
+	if(!dir.exists(ODAFdir)) {dir.create(ODAFdir, recursive = TRUE)}
 	setwd(ODAFdir)
 	FileName <- paste(NORM_TYPE, condition2,"vs",condition1, "FDR", pAdjValue, sep="_")		
 	#Save output tables		
@@ -624,19 +629,19 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
   	print("creating Read count Plots")
   	# top DEGs
   	plotdir <- file.path(paths$DEG_output, "plots")
-  	if(!dir.exists(plotdir)) {dir.create(plotdir)}
+  	if(!dir.exists(plotdir)) {dir.create(plotdir, recursive = TRUE)}
   	barplot.dir <- file.path(paths$DEG_output, "plots", "/barplot_genes/")
-  	if(!dir.exists(barplot.dir)) {dir.create(barplot.dir)}
+  	if(!dir.exists(barplot.dir)) {dir.create(barplot.dir, recursive = TRUE)}
   
   	TOPbarplot.dir <- file.path(barplot.dir, "Top_DEGs")
-  	if(!dir.exists(TOPbarplot.dir)) {dir.create(TOPbarplot.dir)}
+  	if(!dir.exists(TOPbarplot.dir)) {dir.create(TOPbarplot.dir, recursive = TRUE)}
   	setwd(TOPbarplot.dir)
   	draw.barplots(DEsamples, "top", 20) # (DEsamples, top_bottom, NUM)
   	print("Top 20 DEG plots done")
   
   	# Spurious spikes
   	SPIKEbarplot.dir <- file.path(barplot.dir, "DE_Spurious_spikes")
-  	if(!dir.exists(SPIKEbarplot.dir)) {dir.create(SPIKEbarplot.dir)}
+  	if(!dir.exists(SPIKEbarplot.dir)) {dir.create(SPIKEbarplot.dir, recursive = TRUE)}
   	setwd(SPIKEbarplot.dir)
   	draw.barplots(DEspikes, "top", nrow(DEspikes)) # (DEsamples, top_bottom, NUM)
   	print("All DE_Spurious_spike plots done")
@@ -789,6 +794,7 @@ summaryTable <- summaryTable %>%
   left_join(minPvals, by="ensembl_gene_id") %>%
   dplyr::rename(maxFoldChange = linearFoldChange,
          minFDR_pval = padj) %>%
+  dplyr::distinct() %>%
   mutate(maxFoldChange=abs(maxFoldChange)) # This eliminates the direction of change: this way it's easy to sort.
 
 numColsToPrepend <- ncol(summaryTable) - 3*length(resList) - 2 # Number of columns per contrast = 3. Subtract two for the baseMean and ensembl_gene_id columns.
@@ -1549,25 +1555,55 @@ ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
 ###########################################################################################
 ######## PRODUCE INPUT FOR BMDExpress2 ####################################################
 ###########################################################################################
-# Maybe run this code conditional on whether there is a column matching the word dose in the metadata
-# # Create input file...
-#lognorm.read.counts <- as.data.frame(counts(dds, normalized=TRUE))
-# rld normalized, size factor normalized, rounded to 4 significant figures
-bmdexpress <- as.data.frame(assay(rld))
-bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
-bmdexpress <- rbind( Dose=c("#CLASS:DOSE",as.numeric(DESeqDesign$dose)), bmdexpress, stringsAsFactors=F)
-write.table(bmdexpress, file=file.path(paths$DEG_output, "bmdexpress_input.txt"), quote = F, sep = "\t", row.names = F, col.names = T)
-
-fastbmd <- as.data.frame(assay(dds))
-fastbmd <- cbind(SampleID=row.names(fastbmd), fastbmd, stringsAsFactors=F)
-fastbmd <- rbind( Chemical=c("#CLASS:CHEMICAL",as.character(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$chemical)),
-                  fastbmd,
-                  stringsAsFactors=F)
-fastbmd <- rbind( Dose=c("#CLASS:DOSE",format(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$dose, scientific=F)),
-                  fastbmd,
-                  stringsAsFactors=F)
-write.table(fastbmd, file=file.path(paths$DEG_output, "fastbmd_input.txt"), quote = F, sep = "\t", row.names = F, col.names = T)
-
+# Run this code conditional on whether there is a column matching the word dose in the metadata
+if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
+  doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
+  # Create input file...
+  lognorm.read.counts <- as.data.frame(counts(dds, normalized=TRUE))
+  
+  # rld normalized, size factor normalized, rounded to 4 significant figures
+  bmdexpress <- fastbmd <- as.data.frame(lognorm.read.counts)
+  bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
+  bmdexpress <- rbind( Dose=c("#CLASS:DOSE", as.numeric(DESeqDesign[,doseCol])), bmdexpress, stringsAsFactors=F)
+  
+  # Create input for fastbmd also
+  fastbmd <- cbind(SampleID=row.names(fastbmd), fastbmd, stringsAsFactors=F)
+  # Optionally... you can add a second variable name (e.g., chemical) for fastbmd only
+  # fastbmd <- rbind( Chemical=c("#CLASS:CHEMICAL",as.character(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$chemical)),
+  #                  fastbmd,
+  #                  stringsAsFactors=F)
+  fastbmd <- rbind( Dose=c("#CLASS:DOSE",format(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$dose, scientific=F)),
+                    fastbmd,
+                    stringsAsFactors=F)
+  
+  if(!is.na(params$group_facet)) {
+    write.table(bmdexpress,
+                file=file.path(paths$DEG_output, paste0("bmdexpress_input_", params$group_filter, ".txt")),
+                quote = F,
+                sep = "\t",
+                row.names = F,
+                col.names = T)
+    write.table(fastbmd,
+                file=file.path(paths$DEG_output, paste0("fastbmd_input_", params$group_filter, ".txt")),
+                quote = F,
+                sep = "\t",
+                row.names = F,
+                col.names = T)
+  } else {
+    write.table(bmdexpress,
+                file=file.path(paths$DEG_output, "bmdexpress_input.txt"),
+                quote = F,
+                sep = "\t",
+                row.names = F,
+                col.names = T)
+    write.table(fastbmd,
+                file=file.path(paths$DEG_output, "fastbmd_input.txt"),
+                quote = F,
+                sep = "\t",
+                row.names = F,
+                col.names = T)
+  }
+}
 ```
 
 # GO Enrichment Analysis {.tabset}
