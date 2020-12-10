@@ -1,5 +1,5 @@
 ---
-title: "Transcriptome Profiling - Rat TCDD"
+title: "Transcriptome Profiling"
 author: "Matthew J. Meier"
 subtitle: "RNASeq Analysis"
 output:
@@ -10,7 +10,7 @@ output:
     code_folding: hide
     theme: spacelab           # flatly spacelab sandstone cerulean
 params:
-  projectdir: "~/shared/projects/2020_Long_Rat_TCDD/R-ODAF/" # Note trailing slash. We try to avoid requiring it though!
+  projectdir: "~/shared/projects/Template_RNASeq/" # Note trailing slash. We try to avoid requiring it though!
   species: rat                # one of human, mouse, rat, hamster
   design: "Group"             # single experimental group of interest; entries in this column must match the contrast names.
   intgroup: ["Group","Genotype","Treatment"]           # experimental group of interest plus covariates; can be more than one
