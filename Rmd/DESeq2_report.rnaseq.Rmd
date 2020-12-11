@@ -18,7 +18,7 @@ params:
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
   group_facet: "chemical"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: "BPA"           # Which group will this report be done on?
+  group_filter: "Estradiol"           # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
@@ -235,16 +235,6 @@ digits = 2 # For rounding numbers
 
 The code above (not shown by default) specifies user preferences and data locations.
 
-The experimental comparisons of interest are as follows: `r short_contrast_names`.  
-
-```{r 'print_contrasts'}
-knitr::kable(contrasts,
-             row.names = F,
-             col.names = c("Group of interest", "Control for comparison"),
-             caption="Contrasts requested for this analysis.") %>%
-  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
-```
-
 ## Load data
 
 ```{r 'load_data', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
@@ -340,7 +330,19 @@ if (Platform=="RNA-Seq"){
 
 ```
 
-The code above (not shown by default) loads user-provided meta data (i.e., information about your experiment, also known as colData, or, column data). This also imports the count matrix (i.e., a table of observed counts in which each sample is a column and genes are rows).
+The code above (not shown by default) loads user-provided sample meta data (i.e., information about your experiment, also known as colData, or, column data). This also imports the count matrix (i.e., a table of observed counts in which each sample is a column and genes are rows).  
+
+The experimental comparisons of interest to be tested in this report are as follows:  
+
+```{r 'print_contrasts'}
+knitr::kable(contrasts,
+             row.names = F,
+             col.names = c("Group of interest", "Control for comparison"),
+             caption="Contrasts requested for this analysis.") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  scroll_box(height = "720px")
+```
+
 
 ## Run DESeq2
 
@@ -378,7 +380,18 @@ head(colnames(sampleData)) # Output should match
 intgroups <- params$intgroup
 # Intgroups need to be factors for DESeq2
 DESeqDesign[intgroups] <- lapply(DESeqDesign[intgroups], factor)
-if(!is.na(params$design)) { DESeqDesign[params$design] <- factor(DESeqDesign[,params$design]) }
+if(!is.na(params$design)) {
+  # If there is a dose column, reorder the experimental group (DESIGN) by dose.
+  if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
+    doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
+    design_factor_reordered <- factor(DESeqDesign[[params$design]],
+                                      levels=unique(DESeqDesign[[params$design]][order(DESeqDesign[[doseCol]])]),
+                                      ordered=FALSE)
+    DESeqDesign[[params$design]] <- design_factor_reordered
+  } else {
+    DESeqDesign[params$design] <- factor(DESeqDesign[,params$design])
+  }
+}
 
 if (file.exists(file.path(paths$RData, "dds.RData")) & is.na(params$group_facet) & params$use_cached_RData == TRUE) {
   print(paste("Already found DESeq2 object from previous run; loading from disk."))
@@ -454,7 +467,7 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
              row.names =  F,
              caption="Samples and corresponding experimental conditions used in this report") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px")
+  scroll_box(width = "720px", height = "720px")
 }
 
 knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
@@ -474,7 +487,7 @@ knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)) %>% dplyr::filt
              row.names =  F,
              caption="Samples removed from analysis") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px")
+  scroll_box(width = "720px", height = "720px")
 
 knitr::kable(DESeqDesignAsRead %>%
                dplyr::filter(original_names %in% removed) %>%
@@ -495,7 +508,7 @@ knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="Complete sample metadata as provided to the Genomics Laboratory.") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px")
+  scroll_box(width = "720px", height = "720px")
 
 knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
@@ -1031,7 +1044,7 @@ if(is.na(params$group_facet)) {
 
 ```{r 'PCA'}
 ## Perform PCA analysis and make plot
-plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)))
+plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld))) + theme(legend.position = "bottom")
 ## Get percent of variance explained
 data_pca <- plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)), returnData = TRUE)
 percentVar <- round(100 * attr(data_pca, "percentVar"))
@@ -1046,7 +1059,7 @@ This plot shows the first two principal components that explain the variability 
 rld_degs <- rld[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]  # d[ d[[THECOLUMN]] == someValue , ]
 
 ## Perform PCA analysis and make plot
-plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs))
+plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs)) + theme(legend.position = "bottom")
 PCAplotDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs), returnData = TRUE)
 
 ## Get percent of variance explained
@@ -1066,7 +1079,7 @@ select = order(rv, decreasing = TRUE)[1:nBest]
 rld_top <- rld[select,]
 
 ## Perform PCA analysis and make plot
-plotPCA(rld_top, intgroup = params$intgroup, ntop=nrow(rld_top))
+plotPCA(rld_top, intgroup = params$intgroup, ntop=nrow(rld_top)) + theme(legend.position = "bottom")
 
 ## Get percent of variance explained
 data_pcaTop <- plotPCA(rld_top, intgroup = params$intgroup, returnData = TRUE, ntop=nrow(rld_top))
@@ -1079,7 +1092,7 @@ This plot shows the principal components analysis limited to all DEGs. In this c
 
 ## All genes, before filtering
 
-```{r 'sampleDist'}
+```{r 'sampleDist', fig.width=10, fig.height=10}
 ## Obtain the sample euclidean distances
 sampleDists <- stats::dist(t(assay(rld)))
 sampleDistMatrix <- as.matrix(sampleDists)
@@ -1101,7 +1114,7 @@ This plot shows how samples are clustered based on their euclidean distance usin
 
 ## DEGs only
 
-```{r 'sampleDist_degs'}
+```{r 'sampleDist_degs', fig.width=10, fig.height=10}
 ## Limit to the top n genes
 # rv = rowVars(assay(rld))
 # select = order(rv, decreasing = TRUE)[1:nBest]
@@ -1130,7 +1143,7 @@ This plot shows how samples are clustered based on their euclidean distance usin
 
 ## Most variable genes only
 
-```{r 'sampleDist_top'}
+```{r 'sampleDist_top', fig.width=10, fig.height=10}
 ## Limit to the top n genes
 ## Using the select object from PCA code above...
 ## Obtain the sample euclidean distances
@@ -1765,9 +1778,11 @@ DEG_pathways <- clusterProfiler::enricher(
         TERM2NAME = wpid2name)
 DEG_pathways <- DOSE::setReadable(DEG_pathways, orgdb, keyType = "ENTREZID")
 
+if (nrow(DEG_pathways@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
   theme(axis.text.y = element_text(angle = 0)) +
   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+} else { print("No significantly enriched terms using criteria selected") }
 ```
 
 ## WikiPathways: Enrichment by DEGs within each contrast {.tabset}
@@ -1776,7 +1791,7 @@ This section uses clusterProfiler `enricher()` to detect enriched gene sets usin
 
 ```{r 'pathway_analysis_by_contrast_make_plots', collapse=TRUE}
 plotList <- list()
-for (i in 1:length(levels(significantResults$contrast))) {
+for (i in seq_along(levels(significantResults$contrast))) {
   entrezDEGs <- dplyr::left_join(significantResults %>% filter(contrast==levels(significantResults$contrast)[i]),
                                  id_table_entrez,
                                  by=biomart_filter)
@@ -1793,14 +1808,16 @@ for (i in 1:length(levels(significantResults$contrast))) {
           TERM2GENE = wpid2gene,
           TERM2NAME = wpid2name)
   DEG_pathways <- DOSE::setReadable(DEG_pathways, orgdb, keyType = "ENTREZID")
+  if (nrow(DEG_pathways@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   plotList[[i]] <- clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
      theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+  } else { plotList[[i]] <- print("No significantly enriched terms using criteria selected") }
 }
 ```
 
 ```{r 'pathway_analysis_by_contrast_print_plots', results='asis'}
-for (i in 1:length(levels(significantResults$contrast))) {
+for (i in seq_along(levels(significantResults$contrast))) {
   cat("###", levels(significantResults$contrast)[i], " \n")
   if(!is.na(plotList[[i]])) {print(plotList[[i]])} else {print("No pathway perturbations were detected within this contrast.")}
   cat('\n\n')
@@ -1815,7 +1832,7 @@ This section uses clusterProfiler `gseKEGG()` to detect enriched KEGG pathways.
 ```{r 'gsea_analysis_by_contrast_make_plots', collapse=TRUE}
 plotListGSEA <- list()
 plotListGSEA_escore <- list()
-for (i in 1:length(levels(significantResults$contrast))) {
+for (i in seq_along(levels(significantResults$contrast))) {
 DEGs_full <- dplyr::left_join(significantResults %>% filter(contrast==levels(significantResults$contrast)[i]),
                               id_table_entrez,
                               by=biomart_filter)
@@ -1829,7 +1846,7 @@ if (length(foldChanges) < 10) {
   next
 }
 kk <- gseKEGG(foldChanges, keyType="ncbi-geneid", organism=kegg_organism)
-gsea_sorted <- kk %>% filter(p.adjust < .05) %>% arrange(desc(enrichmentScore))
+gsea_sorted <- kk %>% filter(p.adjust < 0.05) %>% arrange(desc(enrichmentScore))
 if(dim(kk@result)[1] > 0){
   plotListGSEA[[i]] <- ridgeplot(kk)
   plotListGSEA_escore[[i]] <- clusterProfiler::gseaplot(gsea_sorted, gsea_sorted$ID[1], title=gsea_sorted$Description[1])
@@ -1841,7 +1858,7 @@ if(dim(kk@result)[1] > 0){
 ```
 
 ```{r 'gsea_analysis_by_contrast_print_plots', results='asis'}
-for (i in 1:length(levels(significantResults$contrast))) {
+for (i in seq_along(levels(significantResults$contrast))) {
   cat("###", levels(significantResults$contrast)[i], " \n")
   if(!is.na(plotListGSEA[[i]])) {
     print(plotListGSEA[[i]])
