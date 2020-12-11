@@ -11,16 +11,16 @@ output:
     theme: spacelab           # flatly spacelab sandstone cerulean
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
-  project_name: "Example"     # Change depending on your project name
-  species: rat                # one of human, mouse, rat, hamster
+  project_name: "Bisphenols"     # Change depending on your project name
+  species: human                # one of human, mouse, rat, hamster
   design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["group","sex","dose"]           # experimental group of interest plus covariates; can be more than one
+  intgroup: ["group","dose","batch","pool"]           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
-  platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: !r NA           # Which group will this report be done on?
-  exclude_samples: ["SRR5890440","SRR5890376"]  # Optionally, a vector of sample names to exclude from the analysis
-  exclude_groups: "female_2" # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
+  platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
+  group_facet: "chemical"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: "BPA"           # Which group will this report be done on?
+  exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
+  exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
   include_only_group: !r NA # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
@@ -228,7 +228,7 @@ if(is.na(params$group_filter)){
 # Specify used platform/technology for data generation:
 Platform <- params$platform # Should be one of "RNA-Seq" or "TempO-Seq"
 NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
-
+if(Platform=="TempO-Seq"){sampledata_sep <- ","} else {sampledata_sep <- "\t"}
 # Misc parameters
 digits = 2 # For rounding numbers
 ```
@@ -248,9 +248,9 @@ knitr::kable(contrasts,
 ## Load data
 
 ```{r 'load_data', collapse=TRUE, warning=FALSE, message=FALSE, eval=flag}
-# Load input files 
+# Load input files
 sampleData <- read.delim(SampleDataFile,
-                         sep="\t",
+                         sep=sampledata_sep,
                          stringsAsFactors=FALSE,
                          header=TRUE, 
                          quote="\"",
@@ -272,12 +272,12 @@ DESeqDesignAsRead <- DESeqDesign
 # 2. Filter manually - useful for removing irrelevant control groups (e.g. reference RNA). params$exclude_groups
 # Note that these should only be run if the respective variables are set.
 if(!is.na(params$group_facet)) {
-  DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$group_facet)==params$group_filter)
   contrasts_to_filter <- DESeqDesign %>%
   dplyr::filter(!!sym(params$group_facet)==params$group_filter) %>%
   pull(params$design) %>% 
   unique()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
+  DESeqDesign <- DESeqDesign %>% dplyr::filter(!!sym(params$design) %in% (unlist(contrasts) %>% unique()) )
 }
 if(any(!is.na(params$exclude_samples))) {
   DESeqDesign <- DESeqDesign %>% dplyr::filter(!original_names %in% params$exclude_samples)
@@ -304,26 +304,34 @@ if(!dir.exists(barplot.dir)) {dir.create(barplot.dir, recursive = TRUE)}
 
 #Set parameters according to platform
 if (Platform=="RNA-Seq"){
+  threshold = 1000000 # Number of aligned reads per sample required
   MinCount <- 1
   alpha <- pAdjValue <- 0.05 # Relaxed from 0.01
   linear_fc_filter = 1.5
+  biomart_filter="ensembl_gene_id"
 } else if (Platform=="TempO-Seq") {
+  threshold = 100000 # Number of aligned reads per sample required
   MinCount<- 0.5
-  alpha <- pAdjValue<- 0.05 
+  alpha <- pAdjValue <- 0.05 
   linear_fc_filter = 1.5
-  # ADD MORE CODE HERE - NEED TO CONDITIONALLY SUM PROBES IN SAMPLE DATA!
+  biomart_filter="external_gene_name"
+  
   biospyder <- read.delim(file.path("~/shared/dbs/biospyder/", temposeq_manifest), # Assay manifest...
                           stringsAsFactors=FALSE,
                           sep="\t",
                           header=TRUE,
                           quote="\"")
-  biospyder_annos <- biospyder %>% select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL)
+  biospyder_annos <- biospyder %>% dplyr::select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL)
   sampleData$PROBE_NAME <- row.names(sampleData)
   sampleData <- sampleData %>%
-    dplyr::left_join(biospyder %>% dplyr::select(GENE_SYMBOL, PROBE_NAME)) %>%
+    mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", "")) %>%
     dplyr::group_by(GENE_SYMBOL) %>%
     dplyr::summarise_if(.predicate = function(x) is.numeric(x),
-                        .funs = c("sum"))
+                        .funs = c("sum")) %>%
+    ungroup()
+  sampleData <- as.data.frame(sampleData)
+  row.names(sampleData) <- sampleData$GENE_SYMBOL
+  sampleData <- sampleData[,-1]
   # biospyder %>% select(ENSEMBL_GENE_ID) %>% distinct() %>% count()
   # sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,] # If aligned to hg38...
 } else { 
@@ -343,7 +351,6 @@ The code above (not shown by default) loads user-provided meta data (i.e., infor
 print(NORM_TYPE) # Name of experiment
 
 # First data clean-up: replace NA & remove samples with total readcount < threshold
-threshold = 1000000
 initialSampleDataCount <- ncol(sampleData)
 sampleData[ is.na(sampleData) ] <- 0 
 sampleData <- sampleData[,(colSums(sampleData) > threshold)] # 1 million reads required per sample
@@ -360,7 +367,7 @@ sampledata_in_metadata <- all(colnames(sampleData) %in% rownames(DESeqDesign))
 # Find samples that were removed because they weren't in metadata
 removed <- colnames(sampleData[which(!colnames(sampleData) %in% rownames(DESeqDesign))])
 # Reorder the metadata table to correspond to the order of columns in the count data
-DESeqDesign <- DESeqDesign[(colnames(sampleData)),]
+DESeqDesign <- DESeqDesign[DESeqDesign$original_names %in% colnames(sampleData),]
 DESeqDesign <- na.omit(DESeqDesign)
 sampleData <- sampleData[,(rownames(DESeqDesign))]
 samples_after <- nrow(DESeqDesign)
@@ -672,7 +679,7 @@ if (file.exists(file.path(paths$RData,"id_table.Rdata"))) {
   load(file.path(paths$RData,"id_table.Rdata"))
   id_table <- id_table_entrez[,1:3]
   } else {
-  id_table_entrez <- getBM(filters="ensembl_gene_id",
+  id_table_entrez <- getBM(filters=biomart_filter,
                         attributes= c("ensembl_gene_id",
                                       "external_gene_name", # mgi_symbol for Mouse
                                       "description",
@@ -684,7 +691,7 @@ if (file.exists(file.path(paths$RData,"id_table.Rdata"))) {
   id_table <- id_table_entrez[,1:3]
 }
 
-genes_entrezid <- dplyr::left_join(data.frame(ensembl_gene_id=genes), id_table_entrez, by="ensembl_gene_id")
+# genes_entrezid <- dplyr::left_join(data.frame(genes), id_table_entrez, by=c("genes" = biomart_filter)) # Can I remove this? I think so
 
 sigtabList <- list()
 alltablList <- list()
@@ -695,19 +702,20 @@ for (i in 1:length(resList)) {
   if (nrow(sigTab) == 0) {
     next
   } else {
-    sigTab <- cbind(ensembl_gene_id=row.names(resList[[i]]),
+    sigTab <- cbind(genes=row.names(resList[[i]]),
                     as(sigTab, "data.frame"),
                     contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
                                     replacement =  "",
                                     x = resList[[i]]@elementMetadata[[2]][2]))
+    names(sigTab)[names(sigTab) == "genes"] <- biomart_filter
     sigTab <- dplyr::left_join(sigTab,
                                id_table,
-                               by="ensembl_gene_id")
+                               by=biomart_filter)
     sigTab <- dplyr::mutate(sigTab, linearFoldChange=ifelse(log2FoldChange > 0,
                                                             2 ^ log2FoldChange,
                                                             -1 / (2 ^ log2FoldChange)))
     #sigTab <- sigTab[,c(1,9,10,2,3,11,5:8)] # Reorder columns
-    sigTab <- sigTab[,c(1,8,9,2,3,10,4:7)] 
+    sigTab <- sigTab[,c(1,8,9,2,3,10,4:7)]
     alltablList[[i]] <- sigTab
     sigTab <- sigTab[!is.na(sigTab$padj) & sigTab$padj < alpha & abs(sigTab$linearFoldChange) > linear_fc_filter, ] ## FILTERS!
     sigtabList[[i]] <- sigTab %>% dplyr::distinct()
@@ -727,6 +735,7 @@ allResults <- rbindlist(alltablList)
 allResults$external_gene_name[is.na(allResults$external_gene_name)] <- allResults$ensembl_gene_id[is.na(allResults$external_gene_name)] 
 # Replace blank gene symbols with ensembl ID
 allResults$external_gene_name[allResults$external_gene_name == ""]  <- allResults$ensembl_gene_id[allResults$external_gene_name == ""]
+
 IPA <- allResults %>% 
   distinct() %>% 
   pivot_wider(names_from = contrast, values_from = c(log2FoldChange,linearFoldChange,lfcSE,pvalue,padj))
@@ -742,8 +751,9 @@ degTable <- significantResults %>%
 
 lengths <- lapply(resList, nrow)
 longest <- which.max(lengths)
-summaryTable <- data.frame( ensembl_gene_id=row.names(resList[[longest]]),
+summaryTable <- data.frame( genes=row.names(resList[[longest]]),
                             baseMean=resList[[longest]]$baseMean )
+names(summaryTable)[names(summaryTable) == "genes"] <- biomart_filter
 contrastsInSummary <- vector()
 for (i in 1:length(resList)) {
   print(i)
@@ -762,12 +772,12 @@ for (i in 1:length(resList)) {
   message(q)
   toJoin <- as.data.frame(resList[[i]])
   setDT(toJoin, keep.rownames = T)[]
-  setnames(toJoin, 1, "ensembl_gene_id")
+  setnames(toJoin, 1, biomart_filter)
   toJoin <- mutate(toJoin, linearFoldChange=ifelse(log2FoldChange > 0,
                                                 2 ^ log2FoldChange,
                                                 -1 / (2 ^ log2FoldChange)))
   toJoin <- toJoin[,c(1:3,7,4:6)]
-  summaryTable <- dplyr::left_join(summaryTable, dplyr::select(toJoin, !c(baseMean,pvalue,lfcSE)), by="ensembl_gene_id")
+  summaryTable <- dplyr::left_join(summaryTable, dplyr::select(toJoin, !c(baseMean,pvalue,lfcSE)), by=biomart_filter)
 
   names(summaryTable)[[ncol(summaryTable)-2]] <- paste0("log2FoldChange_",i)
   names(summaryTable)[[ncol(summaryTable)-1]] <- paste0("linearFoldChange_",i)
@@ -777,35 +787,35 @@ for (i in 1:length(resList)) {
 }
 
 maxFCs <- allResults %>%
-  dplyr::group_by(ensembl_gene_id) %>%
+  dplyr::group_by(!!sym(biomart_filter)) %>%
   dplyr::filter(abs(linearFoldChange) == max(abs(linearFoldChange))) %>%
   dplyr::ungroup() %>%
-  dplyr::select(ensembl_gene_id, linearFoldChange)
+  dplyr::select(!!sym(biomart_filter), linearFoldChange)
 
 minPvals <- allResults %>%
-  group_by(ensembl_gene_id) %>%
+  group_by(!!sym(biomart_filter)) %>%
   dplyr::filter(padj == min(padj)) %>%
   dplyr::ungroup() %>%
-  dplyr::select(ensembl_gene_id, padj)
+  dplyr::select(!!sym(biomart_filter), padj)
 
 summaryTable <- summaryTable %>%
-  left_join(id_table, by="ensembl_gene_id") %>%
-  left_join(maxFCs, by="ensembl_gene_id") %>%
-  left_join(minPvals, by="ensembl_gene_id") %>%
+  left_join(id_table, by=biomart_filter) %>%
+  left_join(maxFCs, by=biomart_filter) %>%
+  left_join(minPvals, by=biomart_filter) %>%
   dplyr::rename(maxFoldChange = linearFoldChange,
          minFDR_pval = padj) %>%
   dplyr::distinct() %>%
   mutate(maxFoldChange=abs(maxFoldChange)) # This eliminates the direction of change: this way it's easy to sort.
 
-numColsToPrepend <- ncol(summaryTable) - 3*length(resList) - 2 # Number of columns per contrast = 3. Subtract two for the baseMean and ensembl_gene_id columns.
+numColsToPrepend <- ncol(summaryTable) - 3*length(resList) - 2 # Number of columns per contrast = 3. Subtract two for the baseMean and genes columns.
 colPositionsToPrependSTART <- ncol(summaryTable) - numColsToPrepend + 1
 colPositionsOfData <- ncol(summaryTable) - numColsToPrepend
 summaryTable <- summaryTable[,c(1,
                                 colPositionsToPrependSTART:ncol(summaryTable),
                                 2:colPositionsOfData)]
 
-CPMddsDF <- data.frame(ensembl_gene_id = row.names(CPMdds), CPMdds, check.names=F)
-CPMddsDF <- dplyr::left_join(CPMddsDF, id_table, by="ensembl_gene_id")
+CPMddsDF <- data.frame(genes = row.names(CPMdds), CPMdds, check.names=F)
+CPMddsDF <- dplyr::left_join(CPMddsDF, id_table, by=c("genes" = biomart_filter))
 numColsToPrepend <- ncol(CPMddsDF) - ncol(CPMdds) - 1
 colPositionsToPrependSTART <- ncol(CPMddsDF) - numColsToPrepend + 1
 colPositionsOfData <- ncol(CPMddsDF) - numColsToPrepend
@@ -1033,7 +1043,7 @@ This plot shows the first two principal components that explain the variability 
 ## DEGs only
 
 ```{r 'PCA_DEGs'}
-rld_degs <- rld[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
+rld_degs <- rld[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]  # d[ d[[THECOLUMN]] == someValue , ]
 
 ## Perform PCA analysis and make plot
 plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs))
@@ -1150,21 +1160,8 @@ This plot shows how samples are clustered based on their euclidean distance usin
 
 ```{r 'heatmap_all_DEGs', collapse=TRUE, fig.height=10}
 
-mat <- assay(rld)[row.names(assay(rld)) %in% significantResults$ensembl_gene_id,]
+mat <- assay(rld)[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]
 mat <- mat - rowMeans(mat)
-
-# quantile_breaks <- function(xs, n = 10) {
-#   breaks <- quantile(xs, probs = seq(0, 1, length.out = n))
-#   breaks[!duplicated(breaks)]
-# }
-# 
-# mat_breaks <- quantile_breaks(mat, n = 11)
-# pheatmap(mat,
-#          annotation_col=heatmap_df,
-#          show_rownames = FALSE,
-#          border_color = NA,
-#          scale="row",
-#          breaks = mat_breaks)
 
 heatmap_df <- as.data.frame(colData(rld)[,params$intgroup])
 row.names(heatmap_df) <- colData(rld)$original_names # Customize!
@@ -1175,76 +1172,24 @@ pheatmap(mat,
          scale="row")
 # color = inferno(10)
 
-chems=unique(DESeqDesign$chemical)
-# plot_list=list()
-for (chem in chems){
-
-samples_for_heatmap <- DESeqDesign[which(DESeqDesign$chemical %in% c(chem, "DMSO 0.1%")),]$original_names
-mat_subset <- mat[,samples_for_heatmap]
-
-genes_for_heatmap_subset <- row.names(mat_subset)
-genes_for_heatmap_subset <- data.frame(ensembl_gene_id=row.names(mat_subset)) %>%
-  dplyr::left_join(id_table,
-                   by="ensembl_gene_id") %>%
-  dplyr::distinct()
-genes_for_heatmap_subset$external_gene_name[is.na(genes_for_heatmap_subset$external_gene_name)]  <- genes_for_heatmap_subset$ensembl_gene_id[is.na(genes_for_heatmap_subset$external_gene_name)]
-genes_for_heatmap$external_gene_name[which(genes_for_heatmap$external_gene_name=="")]  <- genes_for_heatmap$ensembl_gene_id[which(genes_for_heatmap$external_gene_name=="")] 
-row.names(genes_for_heatmap_subset) <- genes_for_heatmap_subset$ensembl_gene_id
-
-# pheatmap(mat_subset,
-#          #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
-#          annotation_col=dplyr::select(heatmap_df,-original_names),
-#          labels_row=genes_for_heatmap_subset[,2],
-#          border_color = NA,
-#          scale = "row",
-#          cutree_rows = 3,
-#          cutree_cols = 4)
-
-mat_subset_ordered <- mat_subset[,dplyr::arrange(heatmap_df[which(heatmap_df$original_names %in% samples_for_heatmap), ],dose)$original_names]
-
-# No clustering on columns
-pheatmap(mat_subset_ordered,
-         #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
-         annotation_col=dplyr::select(heatmap_df,-original_names),
-         cluster_cols = F,
-         labels_row=genes_for_heatmap_subset[,2],
-         border_color = NA,
-         scale = "row",
-         cutree_rows = 3,
-         cutree_cols = 4)
-
-# x=pheatmap(mat,
-#            annotation_col=heatmap_df,
-#            show_rownames = FALSE,
-#            border_color = NA,
-#            scale="row")
-#   plot_list[[a]] = x[[4]]     ##to save each plot into a list. note the [[4]]
-# }
-# do.call(grid.arrange,plot_list)
-
-}
-
-
 ```
 
 ## Top `r nHeatmapDEGs` differentially abundant genes
 
 ```{r 'heatmap_top_degs', fig.height=10, fig.width=10, collapse=TRUE}
-mat_top <- assay(rld)[row.names(assay(rld)) %in% allResultsOrdered_logFC_filter[1:nHeatmapDEGs,]$ensembl_gene_id,]
+mat_top <- assay(rld)[row.names(assay(rld)) %in% allResultsOrdered_logFC_filter[1:nHeatmapDEGs,][[biomart_filter]],]
 mat_top <- mat_top - rowMeans(mat_top)
 
 genes_for_heatmap <- row.names(mat_top)
-genes_for_heatmap <- data.frame(ensembl_gene_id=row.names(mat_top)) %>%
-  dplyr::left_join(id_table,
-                   by="ensembl_gene_id") %>%
+genes_for_heatmap <- data.frame(genes=row.names(mat_top))
+names(genes_for_heatmap)[names(genes_for_heatmap) == "genes"] <- biomart_filter
+genes_for_heatmap <- dplyr::left_join(genes_for_heatmap, id_table_entrez,
+                                     by=biomart_filter) %>%
   dplyr::distinct()
-genes_for_heatmap$external_gene_name[is.na(genes_for_heatmap$external_gene_name)]  <- genes_for_heatmap$ensembl_gene_id[is.na(genes_for_heatmap$external_gene_name)]
-genes_for_heatmap$external_gene_name[which(genes_for_heatmap$external_gene_name=="")]  <- genes_for_heatmap$ensembl_gene_id[which(genes_for_heatmap$external_gene_name=="")] 
-row.names(genes_for_heatmap) <- genes_for_heatmap$ensembl_gene_id
 
 pheatmap(mat_top,
          annotation_col=heatmap_df,
-         labels_row=genes_for_heatmap[,2],
+         labels_row=genes_for_heatmap[["external_gene_name"]],
          show_rownames = TRUE,
          border_color = NA,
          scale="row")
@@ -1255,36 +1200,27 @@ pheatmap(mat_top,
 ## Top `r nHeatmap` variable genes
 
 ```{r 'heatmap_top_n_genes', fig.height=10, fig.width=10, collapse=TRUE}
-
-# sliderInput("nHeatmapShiny", label = "Bandwidth adjustment:",
-#              min = 10, max = 1000, value = 100, step = 10)
-
-# Interactive heatmap
-
-#renderPlot({
 rv = rowVars(assay(rld))
 select = order(rv, decreasing = TRUE)[1:nHeatmap]
 matRV <- assay(rld)[select,]
 matRV <- matRV - rowMeans(matRV)
+
 genes_for_heatmap <- row.names(matRV)
-genes_for_heatmap <- data.frame(ensembl_gene_id=row.names(matRV)) %>%
-  dplyr::left_join(id_table,
-                   by="ensembl_gene_id") %>%
+genes_for_heatmap <- data.frame(genes=row.names(matRV))
+names(genes_for_heatmap)[names(genes_for_heatmap) == "genes"] <- biomart_filter
+genes_for_heatmap <- dplyr::left_join(genes_for_heatmap, id_table_entrez,
+                                      by=biomart_filter) %>%
   dplyr::distinct()
-genes_for_heatmap$external_gene_name[is.na(genes_for_heatmap$external_gene_name)]  <- genes_for_heatmap$ensembl_gene_id[is.na(genes_for_heatmap$external_gene_name)]  
-genes_for_heatmap$external_gene_name[which(genes_for_heatmap$external_gene_name=="")]  <- genes_for_heatmap$ensembl_gene_id[which(genes_for_heatmap$external_gene_name=="")] 
-row.names(genes_for_heatmap) <- genes_for_heatmap$ensembl_gene_id
 
 pheatmap(matRV,
          #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
          annotation_col=heatmap_df,
-         labels_row=genes_for_heatmap[,2],
+         labels_row=genes_for_heatmap[["external_gene_name"]],
          border_color = NA,
          scale = "row",
          cutree_rows = 3,
          cutree_cols = 4)
 
-#})
 ```
 
 
@@ -1456,7 +1392,7 @@ DT::datatable(res.df.dt,
           extensions = 'Buttons',
           rownames = FALSE,
           filter = "top",
-          colnames = c('Ensembl' = 'ensembl_gene_id')) %>% 
+          colnames = c('Gene' = 'ensembl_gene_id')) %>% 
   DT::formatRound(which(!colnames(res.df.dt) %in% c('pvalue',
                                                     'padj',
                                                     'Feature',
@@ -1478,18 +1414,20 @@ plotCounts_gg <- function(i, dds, intgroup) {
                        gene=i,
                        intgroup=params$intgroup,
                        returnData = TRUE)
+    plot_title <- paste(id_table$external_gene_name[id_table[[biomart_filter]] == i],
+                        id_table$ensembl_gene_id[id_table[[biomart_filter]] == i])
     ggplot(data, aes(x = data[,2], y = data[,1])) + 
       geom_point() + 
       ylab('Normalized count') +
       xlab('Group') + 
-      ggtitle(paste0(i, " ", id_table$external_gene_name[id_table$ensembl_gene_id == i])) + 
+      ggtitle(plot_title) + 
       coord_trans(y = "log10") + 
       theme(axis.text.x = element_text(angle = 90, hjust = 1))
 }
 
 genesToPlot <- significantResults %>% arrange(-abs(log2FoldChange))
 
-for(i in head(unique(genesToPlot$ensembl_gene_id), nBestFeatures)) {
+for(i in head(unique(genesToPlot[[biomart_filter]]), nBestFeatures)) {
   print(plotCounts_gg(i, dds = dds, intgroup = params$intgroup))
 }
 
@@ -1614,9 +1552,9 @@ This section performs GO enrichment on **all DEGs passing filters**. The backgro
 ## Remember that dds had ENSEMBL ids for the genes
 # ensemblNames <- gsub("\\..*", "", rownames(dds))
 
-ensemblDEGs <- significantResults$ensembl_gene_id
+ensemblDEGs <- significantResults[[biomart_filter]]
 head(ensemblDEGs)
-DEGs <- dplyr::left_join(data.frame(ensembl_gene_id=ensemblDEGs), id_table_entrez, by="ensembl_gene_id")
+DEGs <- dplyr::left_join(data.frame(genes=ensemblDEGs), id_table_entrez, by=c("genes" = biomart_filter))
 head(DEGs)
 entrezDEGs <- as.character(DEGs$entrezgene_id)
 entrezDEGs <- entrezDEGs[!is.na(entrezDEGs)]
@@ -1624,7 +1562,7 @@ entrezDEGs <- entrezDEGs[!is.na(entrezDEGs)]
 #### DEFINE INPUTS
 myDEGs <- entrezDEGs
 # background <- row.names(assay(dds))
-background <- dplyr::left_join(data.frame(ensembl_gene_id=row.names(assay(dds))), id_table_entrez, by="ensembl_gene_id") %>%
+background <- dplyr::left_join(data.frame(genes=row.names(assay(dds))), id_table_entrez, by=c("genes"=biomart_filter)) %>%
   dplyr::filter(!is.na(entrezgene_id)) %>%
   dplyr::pull(entrezgene_id)
 background <- as.character(background)
@@ -1678,101 +1616,123 @@ enrich_go_mf <- enrichGO(gene = myDEGs,
                          pvalueCutoff = 0.01,
                          qvalueCutoff = 0.05)
 
-# enrich_go_cc <- enrichGO(gene = myDEGs,
-#                          universe = background, # All genes in dataset
-#                          OrgDb = orgdb,
-#                          keyType = KeyType,
-#                          ont = "CC",
-#                          pAdjustMethod = "BH",
-#                          pvalueCutoff = 0.01,
-#                          qvalueCutoff = 0.05)
+enrich_go_cc <- enrichGO(gene = myDEGs,
+                         universe = background, # All genes in dataset
+                         OrgDb = orgdb,
+                         keyType = KeyType,
+                         ont = "CC",
+                         pAdjustMethod = "BH",
+                         pvalueCutoff = 0.01,
+                         qvalueCutoff = 0.05)
 
 ```
 
 ## Biological processes
 
 ```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
-clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
-  theme(axis.text.y = element_text(angle = 0)) +
-  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
-
-DEGs_full <- dplyr::left_join(significantResults,
-                              id_table_entrez,
-                              by="ensembl_gene_id") %>%
-  distinct()
-foldChanges <- DEGs_full %>% dplyr::pull(log2FoldChange)
-names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
-foldChanges <- foldChanges %>% sort() %>% rev()
-foldChanges <- foldChanges[!is.na(names(foldChanges))]
-
-simplified_bp <- simplify(enrich_go_bp, cutoff = 0.7, by = "p.adjust", select_fun = min)
-# Max size of gene set... useful for visualizing networks
-simplified_bp_for_network <- simplified_bp %>% DOSE::gsfilter(by="GSSize", max=400)
-# I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
-# Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
-simplified_bp_filt <- simplified_bp %>%
-    filter(p.adjust < .05, qvalue < 0.05) %>%
-    mutate(GeneRatio = DOSE::parse_ratio(GeneRatio)) %>%
-    arrange(desc(GeneRatio))
-
-show3 <- simplified_bp_filt$Description[1:3] # Top 3
-show3 <- show3[!is.na(show3)]
-show5 <- simplified_bp_filt$Description[1:5] # Top 5
-show5 <- show5[!is.na(show5)]
-show10 <- simplified_bp_filt$Description[1:10] # Top 10
-show10 <- show10[!is.na(show10)]
-
-
-cnetplot(simplified_bp,
-         foldChange=foldChanges,
-         showCategory = show10,
-         cex_label_gene=0.3)
-
-upsetplot(enrich_go_bp)
-heatplot(simplified_bp, foldChange=foldChanges, showCategory = show10)
+if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
+  clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
+    theme(axis.text.y = element_text(angle = 0)) +
+    scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+  
+  DEGs_full <- dplyr::left_join(significantResults,
+                                id_table_entrez,
+                                by=biomart_filter) %>%
+    distinct()
+  foldChanges <- DEGs_full %>% dplyr::pull(log2FoldChange)
+  names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
+  foldChanges <- foldChanges %>% sort() %>% rev()
+  foldChanges <- foldChanges[!is.na(names(foldChanges))]
+  
+  simplified_bp <- simplify(enrich_go_bp, cutoff = 0.7, by = "p.adjust", select_fun = min)
+  # Max size of gene set... useful for visualizing networks
+  simplified_bp_for_network <- simplified_bp %>% DOSE::gsfilter(by="GSSize", max=400)
+  # I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
+  # Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
+  simplified_bp_filt <- simplified_bp %>%
+      filter(p.adjust < .05, qvalue < 0.05) %>%
+      mutate(GeneRatio = DOSE::parse_ratio(GeneRatio)) %>%
+      arrange(desc(GeneRatio))
+  
+  show3 <- simplified_bp_filt$Description[1:3] # Top 3
+  show3 <- show3[!is.na(show3)]
+  show5 <- simplified_bp_filt$Description[1:5] # Top 5
+  show5 <- show5[!is.na(show5)]
+  show10 <- simplified_bp_filt$Description[1:10] # Top 10
+  show10 <- show10[!is.na(show10)]
+  
+  cnetplot(simplified_bp,
+           foldChange=foldChanges,
+           showCategory = show10,
+           cex_label_gene=0.3)
+  
+  upsetplot(enrich_go_bp)
+  heatplot(simplified_bp, foldChange=foldChanges, showCategory = show10)
+} else { print("No significantly enriched terms using criteria selected") }
 ```
 
 ## Molecular Functions
 
 ```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
-clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
-   theme(axis.text.y = element_text(angle = 0)) +
-  scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
-
-simplified_mf <- simplify(enrich_go_mf, cutoff = 0.7, by = "p.adjust", select_fun = min)
-# Max size of gene set... useful for visualizing networks
-simplified_mf_for_network <- simplified_mf %>% DOSE::gsfilter(by="GSSize", max=400)
-# I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
-# Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
-simplified_mf_filt <- simplified_mf %>%
-    filter(p.adjust < .05, qvalue < 0.05) %>%
-    mutate(GeneRatio = DOSE::parse_ratio(GeneRatio)) %>%
-    arrange(desc(GeneRatio))
-
-show3 <- simplified_mf_filt$Description[1:3] # Top 3
-show5 <- simplified_mf_filt$Description[1:5] # Top 5
-show10 <- simplified_mf_filt$Description[1:10] # Top 10
-
-cnetplot(simplified_mf,
-         foldChange=foldChanges,
-         showCategory = show10,
-         cex_label_gene=0.3)
-
-upsetplot(enrich_go_mf)
-heatplot(simplified_mf, foldChange=foldChanges, showCategory = show10)
+if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
+  clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
+     theme(axis.text.y = element_text(angle = 0)) +
+    scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+  
+  simplified_mf <- simplify(enrich_go_mf, cutoff = 0.7, by = "p.adjust", select_fun = min)
+  # Max size of gene set... useful for visualizing networks
+  simplified_mf_for_network <- simplified_mf %>% DOSE::gsfilter(by="GSSize", max=400)
+  # I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
+  # Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
+  simplified_mf_filt <- simplified_mf %>%
+      filter(p.adjust < .05, qvalue < 0.05) %>%
+      mutate(GeneRatio = DOSE::parse_ratio(GeneRatio)) %>%
+      arrange(desc(GeneRatio))
+  
+  show3 <- simplified_mf_filt$Description[1:3] # Top 3
+  show5 <- simplified_mf_filt$Description[1:5] # Top 5
+  show10 <- simplified_mf_filt$Description[1:10] # Top 10
+  
+  cnetplot(simplified_mf,
+           foldChange=foldChanges,
+           showCategory = show10,
+           cex_label_gene=0.3)
+  
+  upsetplot(enrich_go_mf)
+  heatplot(simplified_mf, foldChange=foldChanges, showCategory = show10)
+} else { print("No significantly enriched terms using criteria selected") }
 ```
 
 ## Cellular Component
 
-This is not displayed by default because the cellular component ontology does not always have statistically significant enriched  genes. If you are expecting to see results here, the analysis can be repeated.  
-
 ```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
-# clusterProfiler::dotplot(enrich_go_all %>% filter(ONTOLOGY=="CC"), font.size=9, c="BgRatio")  +
-#    theme(axis.text.y = element_text(angle = 0)) +
-#   scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
-
-# Causes an error...
-
+if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
+  clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
+     theme(axis.text.y = element_text(angle = 0)) +
+    scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+  
+  simplified_cc <- simplify(enrich_go_cc, cutoff = 0.7, by = "p.adjust", select_fun = min)
+  # Max size of gene set... useful for visualizing networks
+  simplified_cc_for_network <- simplified_cc %>% DOSE::gsfilter(by="GSSize", max=400)
+  # I believe there is a bug in the current version of DOSE or clusterProfiler that prevents this from working
+  # Throws this error on plotting: Error in graph.data.frame(x, directed = FALSE) : the data frame should contain at least two columns
+  simplified_cc_filt <- simplified_cc %>%
+      filter(p.adjust < .05, qvalue < 0.05) %>%
+      mutate(GeneRatio = DOSE::parse_ratio(GeneRatio)) %>%
+      arrange(desc(GeneRatio))
+  
+  show3 <- simplified_cc_filt$Description[1:3] # Top 3
+  show5 <- simplified_cc_filt$Description[1:5] # Top 5
+  show10 <- simplified_cc_filt$Description[1:10] # Top 10
+  
+  cnetplot(simplified_cc,
+           foldChange=foldChanges,
+           showCategory = show10,
+           cex_label_gene=0.3)
+  
+  upsetplot(enrich_go_cc)
+  heatplot(simplified_cc, foldChange=foldChanges, showCategory = show10)
+} else { print("No significantly enriched terms using criteria selected") }
 ```
 
 # Pathway Analysis using Enriched WikiPathways and GSEA (KEGG)
@@ -1785,7 +1745,7 @@ This section uses clusterProfiler to detect enriched gene sets using [WikiPathwa
 entrez_IDs <- as.character(id_table_entrez$entrezgene_id)
 entrezDEGs <- dplyr::left_join(significantResults,
                                id_table_entrez,
-                               by="ensembl_gene_id")
+                               by=biomart_filter)
 entrezDEGs <- as.vector(entrezDEGs$entrezgene_id)
 
 Wiki <- rWikiPathways::downloadPathwayArchive(organism=species_sci, format = "gmt", destpath = paths$DEG_output)
@@ -1819,7 +1779,7 @@ plotList <- list()
 for (i in 1:length(levels(significantResults$contrast))) {
   entrezDEGs <- dplyr::left_join(significantResults %>% filter(contrast==levels(significantResults$contrast)[i]),
                                  id_table_entrez,
-                                 by="ensembl_gene_id")
+                                 by=biomart_filter)
   entrezDEGs <- entrezDEGs$entrezgene_id
   if (length(entrezDEGs)<10) {
     plotList[[i]] <- NA
@@ -1858,7 +1818,7 @@ plotListGSEA_escore <- list()
 for (i in 1:length(levels(significantResults$contrast))) {
 DEGs_full <- dplyr::left_join(significantResults %>% filter(contrast==levels(significantResults$contrast)[i]),
                               id_table_entrez,
-                              by="ensembl_gene_id")
+                              by=biomart_filter)
 foldChanges <- DEGs_full %>% dplyr::pull(log2FoldChange)
 names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
 foldChanges <- foldChanges %>% sort() %>% rev()
