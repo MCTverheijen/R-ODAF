@@ -9,16 +9,17 @@ output:
     number_sections: true
     code_folding: hide
     theme: spacelab           # flatly spacelab sandstone cerulean
+    code_download: true
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
-  project_name: "Bisphenols"     # Change depending on your project name
-  species: human                # one of human, mouse, rat, hamster
+  project_name: "Template"     # Change depending on your project name
+  species: "rat"                # one of human, mouse, rat, hamster
   design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["group","dose","batch","pool"]           # experimental group of interest plus covariates; can be more than one
+  intgroup: ["group","dose"]           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
-  platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: "chemical"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: "Estradiol"           # Which group will this report be done on?
+  platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
+  group_facet: "sex"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: "male"           # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
@@ -340,7 +341,7 @@ knitr::kable(contrasts,
              col.names = c("Group of interest", "Control for comparison"),
              caption="Contrasts requested for this analysis.") %>%
   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
-  scroll_box(height = "720px")
+  scroll_box(height = "480px")
 ```
 
 
@@ -461,13 +462,13 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
              row.names =  F,
              caption="Samples and corresponding experimental conditions used in this report") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px", height = "720px")
+  scroll_box(width = "100%", height = "480px")
 } else {
   knitr::kable(DESeqDesign %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="Samples and corresponding experimental conditions used in this report") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px", height = "720px")
+  scroll_box(width = "100%", height = "480px")
 }
 
 knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
@@ -475,7 +476,7 @@ knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
              col.names = c("Experimental group", "Number of samples in group"),
              caption="Number of samples in each experimental group used in this report") %>%
   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
-  scroll_box(width = "720px", height = "720px")
+  scroll_box(width = "100%", height = "480px")
 ```
 
 ### Samples removed from this report
@@ -488,7 +489,7 @@ knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)) %>% dplyr::filt
              row.names =  F,
              caption="Samples removed from analysis") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px", height = "720px")
+  scroll_box(width = "100%", height = "480px")
 
 knitr::kable(DESeqDesignAsRead %>%
                dplyr::filter(original_names %in% removed) %>%
@@ -497,7 +498,7 @@ knitr::kable(DESeqDesignAsRead %>%
              col.names = c("Experimental group", "Number of samples removed"),
              caption="Number of samples removed from each experimental group") %>%
   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
-  scroll_box(width = "720px", height = "720px")
+  scroll_box(width = "100%", height = "480px")
 ```
 
 ### Original sample metadata as provided
@@ -510,14 +511,14 @@ knitr::kable(DESeqDesignAsRead %>% arrange(!!sym(params$design)),
              row.names =  F,
              caption="Complete sample metadata as provided to the Genomics Laboratory.") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px", height = "720px")
+  scroll_box(width = "100%", height = "480px")
 
 knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
              col.names = c("Experimental group", "Number of samples as provided"),
              caption="Number of samples and experimental groups as provided") %>%
   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
-  scroll_box(width = "720px", height = "720px")
+  scroll_box(width = "100%", height = "480px")
 ```
 
 ## Load R-ODAF functions
@@ -1047,7 +1048,9 @@ if(is.na(params$group_facet)) {
 
 ```{r 'PCA'}
 ## Perform PCA analysis and make plot
-plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld))) + theme(legend.position = "bottom")
+plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld))) + 
+  theme(legend.position = "bottom") +
+  guides(fill=guide_legend(ncol=3))
 ## Get percent of variance explained
 data_pca <- plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)), returnData = TRUE)
 percentVar <- round(100 * attr(data_pca, "percentVar"))
@@ -1062,7 +1065,9 @@ This plot shows the first two principal components that explain the variability 
 rld_degs <- rld[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]  # d[ d[[THECOLUMN]] == someValue , ]
 
 ## Perform PCA analysis and make plot
-plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs)) + theme(legend.position = "bottom")
+plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs)) +
+  theme(legend.position = "bottom") +
+  guides(fill=guide_legend(ncol=3))
 PCAplotDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs), returnData = TRUE)
 
 ## Get percent of variance explained
@@ -1082,7 +1087,9 @@ select = order(rv, decreasing = TRUE)[1:nBest]
 rld_top <- rld[select,]
 
 ## Perform PCA analysis and make plot
-plotPCA(rld_top, intgroup = params$intgroup, ntop=nrow(rld_top)) + theme(legend.position = "bottom")
+plotPCA(rld_top, intgroup = params$intgroup, ntop=nrow(rld_top)) + 
+  theme(legend.position = "bottom") +
+  guides(fill=guide_legend(ncol=3))
 
 ## Get percent of variance explained
 data_pcaTop <- plotPCA(rld_top, intgroup = params$intgroup, returnData = TRUE, ntop=nrow(rld_top))
@@ -1246,7 +1253,7 @@ This section contains three groups of MA plots (see [Wikipedia](https://en.wikip
 
 ## Filtered at `r metadata(resList[[1]])$alpha` {.tabset}
 
-This first group of plots shows `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.  
+This group of plots shows `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.  
 
 ```{r 'MAplotalpha', results='asis'}
 ## MA plot with alpha used in DESeq2::results()
@@ -1260,44 +1267,32 @@ DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha, main = paste(
 cat('\n\n')
 }
 
-```
+## Used to have multiple tabsets for MA plots... it was too many MA plots.
 
-## Filtered at `r metadata(resList[[1]])$alpha / 2` {.tabset}
-
-This second group of MA plots uses `alpha` = `r metadata(resList[[1]])$alpha / 2` and can be used against the first MA plot to identify features which have adjusted p-values between `r metadata(resList[[1]])$alpha / 2` and `r metadata(resList[[1]])$alpha`.
-
-```{r 'MAplotalphaHalf', results='asis'}
 ## MA plot with alpha = 1/2 of the alpha used in DESeq2::results()
-for (i in 1:length(resList)) {
-contrast = gsub(pattern = "log2.*Time\ ",
-                replacement =  "",
-                x = resList[[i]]@elementMetadata[[2]][2])
-cat("###", contrast, " \n")
-DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha / 2,
-    main = paste('MA plot with alpha =', metadata(resList[[i]])$alpha / 2,',',contrast))
-cat('\n\n')
-}
+# for (i in 1:length(resList)) {
+# contrast = gsub(pattern = "log2.*Time\ ",
+#                 replacement =  "",
+#                 x = resList[[i]]@elementMetadata[[2]][2])
+# cat("###", contrast, " \n")
+# DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha / 2,
+#     main = paste('MA plot with alpha =', metadata(resList[[i]])$alpha / 2,',',contrast))
+# cat('\n\n')
+# }
 
-```
-
-## Top `r min(nBest, nrow(head(res.df, n = nBest)))` features {.tabset}
-
-The third and final set of MA plots uses an `alpha` such that the top `r min(nBest, nrow(head(res.df, n = nBest)))` features are shown in the plot.
-
-```{r 'MAplotalpha-nBest', results='asis'}
 ## MA plot with alpha corresponding to the one that gives the nBest features
+# for (i in 1:length(resList)) {
+# nBest.actual <- min(nBest, nrow(head(resList[[i]], n = nBest)))
+# nBest.alpha <- head( resList[[i]][order(resList[[i]]$pvalue),], n = nBest)$padj[nBest.actual]
+# contrast = gsub(pattern = "log2.*Time\ ",
+#                 replacement =  "",
+#                 x = resList[[i]]@elementMetadata[[2]][2])
+# cat("###", contrast, " \n")
+# DESeq2::plotMA(resList[[i]], alpha = nBest.alpha * 1.00000000000001,
+#     main = paste('MA plot for top', nBest.actual, 'features',',',contrast))
+# cat('\n\n')
+# }
 
-for (i in 1:length(resList)) {
-nBest.actual <- min(nBest, nrow(head(resList[[i]], n = nBest)))
-nBest.alpha <- head( resList[[i]][order(resList[[i]]$pvalue),], n = nBest)$padj[nBest.actual]
-contrast = gsub(pattern = "log2.*Time\ ",
-                replacement =  "",
-                x = resList[[i]]@elementMetadata[[2]][2])
-cat("###", contrast, " \n")
-DESeq2::plotMA(resList[[i]], alpha = nBest.alpha * 1.00000000000001,
-    main = paste('MA plot for top', nBest.actual, 'features',',',contrast))
-cat('\n\n')
-}
 ```
 
 # P-values {.tabset}
