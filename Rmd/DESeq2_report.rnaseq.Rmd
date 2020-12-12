@@ -445,7 +445,7 @@ The user-provided metadata initially included `r samples_before` samples.
 
 The count matrix initially included `r initialSampleDataCount` samples (including any reference material samples). After removing samples with less than $`r threshold`$ reads, `r filteredSampleDataCount` samples were left. It is `r metadata_in_sampledata` that all the samples provided in the metadata table were also identified in the count matrix. It is `r sampledata_in_metadata` that all the samples in the count matrix were also identified in the metadata table.  
 
-Following the removal of other samples (i.e., reference RNA, etc.), there were `r samples_after` samples remaining in the experiment. The samples excluded from analysis were named: `r paste(removed)`.    
+Following the removal of other samples (i.e., reference RNA, etc.), there were `r samples_after` samples remaining in the experiment. The samples excluded from analysis are shown in the table in the section titled "Sample data", along with complete sample metadata for the experiment.    
 
 ## Sample data (metadata about your experiment) {.tabset}
 
@@ -461,7 +461,7 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
              row.names =  F,
              caption="Samples and corresponding experimental conditions used in this report") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
-  scroll_box(width = "720px")
+  scroll_box(width = "720px", height = "720px")
 } else {
   knitr::kable(DESeqDesign %>% arrange(!!sym(params$design)),
              row.names =  F,
@@ -474,7 +474,8 @@ knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
              col.names = c("Experimental group", "Number of samples in group"),
              caption="Number of samples in each experimental group used in this report") %>%
-  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  scroll_box(width = "720px", height = "720px")
 ```
 
 ### Samples removed from this report
@@ -495,7 +496,8 @@ knitr::kable(DESeqDesignAsRead %>%
              row.names = F,
              col.names = c("Experimental group", "Number of samples removed"),
              caption="Number of samples removed from each experimental group") %>%
-  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  scroll_box(width = "720px", height = "720px")
 ```
 
 ### Original sample metadata as provided
@@ -514,7 +516,8 @@ knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
              row.names = F,
              col.names = c("Experimental group", "Number of samples as provided"),
              caption="Number of samples and experimental groups as provided") %>%
-  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  scroll_box(width = "720px", height = "720px")
 ```
 
 ## Load R-ODAF functions
@@ -1889,7 +1892,7 @@ for (i in 1:length(levels(significantResults$contrast))) {
 
 Please use this as a starting point for the bioinformatics/statistics section of any publications based on the data analyzed in this report. All of the information provided here is contained elsewhere in the report, but it is aggregated here for your convenience.  
 
-There were `r samples_before` samples for which data was collected. A count matrix containing the $`r initialSampleDataCount`$ samples sequenced in this experiment was imported into R for statistical analysis. After removing samples with less than $`r threshold`$ reads, `r filteredSampleDataCount` samples were left. Following the exclusion of other samples *(which ones? Why? Please explain for your experiment, if applicable.)*, there were `r samples_after` samples remaining. Following the recommendations set out by the Omics Data Analysis Frameworks for Regulatory application (R-ODAF) guidelines, genes were filtered to include only those where 75% of at least one experimental group were above `r MinCount` CPM, and spurious spikes were removed in which (max - median) of counts were less than (sum of counts)/(number of replicates + 1). The samples excluded from analysis were: `r paste(removed, sep=",")`. We used DESeq2 `r packageVersion("DESeq2")` to test for differentially abundant genes within the `r Platform` data. The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`. An alpha of `r resList[[1]]@metadata$alpha` was used to extract raw results, which are reported as the `r gsub(mcols(x=resList[[1]])$description[[4]],pattern=":.*",replacement="")`. To account for multiple testing, `r mcols(resList[[1]])$description[5]` are reported. Cook's cutoff was set to `r cooks` in this analysis. Differentially expressed genes (DEGs) were filtered using a linear fold change cutoff of `r linear_fc_filter` and adjusted p-value of `r alpha`.  
+There were `r samples_before` samples for which data was collected. A count matrix containing the $`r initialSampleDataCount`$ samples sequenced in this experiment was imported into R for statistical analysis. After removing samples with less than $`r threshold`$ reads, `r filteredSampleDataCount` samples were left. Following the exclusion of other samples *(which ones? Why? Please explain for your experiment, if applicable.)*, there were `r samples_after` samples remaining. Following the recommendations set out by the Omics Data Analysis Frameworks for Regulatory application (R-ODAF) guidelines, genes were filtered to include only those where 75% of at least one experimental group were above `r MinCount` CPM, and spurious spikes were removed in which (max - median) of counts were less than (sum of counts)/(number of replicates + 1). The samples excluded from analysis are shown in the table below. We used DESeq2 `r packageVersion("DESeq2")` to test for differentially abundant genes within the `r Platform` data. The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`. An alpha of `r resList[[1]]@metadata$alpha` was used to extract raw results, which are reported as the `r gsub(mcols(x=resList[[1]])$description[[4]],pattern=":.*",replacement="")`. To account for multiple testing, `r mcols(resList[[1]])$description[5]` are reported. Cook's cutoff was set to `r cooks` in this analysis. Differentially expressed genes (DEGs) were filtered using a linear fold change cutoff of `r linear_fc_filter` and adjusted p-value of `r alpha`.  
 
 # Session Info
 
