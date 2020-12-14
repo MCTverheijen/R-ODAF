@@ -12,14 +12,14 @@ output:
     code_download: true
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
-  project_name: "Template"     # Change depending on your project name
+  project_name: "Flame_retardants"     # Change depending on your project name
   species: "rat"                # one of human, mouse, rat, hamster
   design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
   intgroup: ["group","dose"]           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: "sex"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: "male"           # Which group will this report be done on?
+  group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: !r NA           # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
@@ -448,7 +448,7 @@ The count matrix initially included `r initialSampleDataCount` samples (includin
 
 Following the removal of other samples (i.e., reference RNA, etc.), there were `r samples_after` samples remaining in the experiment. The samples excluded from analysis are shown in the table in the section titled "Sample data", along with complete sample metadata for the experiment.    
 
-## Sample data (metadata about your experiment) {.tabset}
+## Sample data (metadata about your experiment) {.tabset .tabset-fade}
 
 ### Samples used in this report
 
@@ -1042,7 +1042,7 @@ if(is.na(params$group_facet)) {
 # If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
 ```
 
-# PCA Plots {.tabset}
+# PCA Plots {.tabset .tabset-fade}
 
 ## All genes, before filtering
 
@@ -1098,7 +1098,7 @@ percentVarTop <- round(100 * attr(data_pcaTop, "percentVar"))
 
 This plot shows the principal components analysis limited to all DEGs. In this case, the first and second principal component explain `r percentVarTop[1]` and `r percentVarTop[2]` percent of the variance respectively.
 
-# Sample-to-sample distances {.tabset}
+# Sample-to-sample distances {.tabset .tabset-fade}
 
 ## All genes, before filtering
 
@@ -1177,7 +1177,7 @@ pheatmap(sampleDistMatrixTop,
 
 This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data of the top `r nBest` most variable genes. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
 
-# Heatmaps {.tabset}
+# Heatmaps {.tabset .tabset-fade}
 
 ## All DEGs
 
@@ -1251,7 +1251,7 @@ pheatmap(matRV,
 
 This section contains three groups of MA plots (see [Wikipedia](https://en.wikipedia.org/wiki/MA_plot)) that compare the mean of the normalized counts against the log fold change. Each of the groups has a tab for each contrast. The plots show one point per feature. The points are shown in red if the feature has an adjusted p-value less than the cutoff listed in each section, that is, the statistically significant features are shown in red.
 
-## Filtered at `r metadata(resList[[1]])$alpha` {.tabset}
+## Filtered at `r metadata(resList[[1]])$alpha` {.tabset .tabset-fade}
 
 This group of plots shows `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.  
 
@@ -1295,7 +1295,7 @@ cat('\n\n')
 
 ```
 
-# P-values {.tabset}
+# P-values {.tabset .tabset-fade}
 
 ## Distribution of all p-values
 
@@ -1559,7 +1559,7 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
 }
 ```
 
-# GO Enrichment Analysis {.tabset}
+# GO Enrichment Analysis {.tabset .tabset-fade}
 
 This section performs GO enrichment on **all DEGs passing filters**. The background set of genes is those that were identified in this sequencing experiment. The [clusterProfiler](https://bioconductor.org/packages/release/bioc/html/clusterProfiler.html) package is used for this analysis.
 
@@ -1594,15 +1594,15 @@ KeyType <- "ENTREZID" # ENSEMBL? ACCNUM? GID? ENTREZID?
 # head(keys(orgdb, keytype="ENTREZID"))
 
 # Run all at once...
-enrich_go_all <- enrichGO(gene = myDEGs,
-                         universe = background, # All genes in dataset
-                         OrgDb = orgdb,
-                         keyType = KeyType,
-                         readable=T,
-                         ont = "all",
-                         pAdjustMethod = "BH",
-                         pvalueCutoff = 0.01,
-                         qvalueCutoff = 0.05)
+# enrich_go_all <- enrichGO(gene = myDEGs,
+#                          universe = background, # All genes in dataset
+#                          OrgDb = orgdb,
+#                          keyType = KeyType,
+#                          readable=T,
+#                          ont = "all",
+#                          pAdjustMethod = "BH",
+#                          pvalueCutoff = 0.01,
+#                          qvalueCutoff = 0.05)
 
 # clusterProfiler::dotplot(enrich_go_all, font.size=9, showCategory=10, split="ONTOLOGY")  +
 #   theme(axis.text.y = element_text(angle = 0)) +
@@ -1646,7 +1646,7 @@ enrich_go_cc <- enrichGO(gene = myDEGs,
 
 ```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
 if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
-  clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
+  plot1 <- clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
     theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
   
@@ -1676,13 +1676,19 @@ if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   show10 <- simplified_bp_filt$Description[1:10] # Top 10
   show10 <- show10[!is.na(show10)]
   
-  cnetplot(simplified_bp,
+  plot2 <- cnetplot(simplified_bp,
            foldChange=foldChanges,
            showCategory = show10,
            cex_label_gene=0.3)
   
-  upsetplot(enrich_go_bp)
-  heatplot(simplified_bp, foldChange=foldChanges, showCategory = show10)
+  plot3 <- upsetplot(enrich_go_bp)
+  plot4 <- heatplot(simplified_bp, foldChange=foldChanges, showCategory = show10) +
+    scale_y_discrete(labels = function(x) stringr::str_trunc(x, width = 50))
+  
+  print(plot1)
+  print(plot2)
+  print(plot3)
+  print(plot4)
 } else { print("No significantly enriched terms using criteria selected") }
 ```
 
@@ -1690,7 +1696,7 @@ if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 
 ```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
 if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
-  clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
+  plot1 <- clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
      theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
   
@@ -1708,13 +1714,21 @@ if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   show5 <- simplified_mf_filt$Description[1:5] # Top 5
   show10 <- simplified_mf_filt$Description[1:10] # Top 10
   
-  cnetplot(simplified_mf,
+  plot2 <- cnetplot(simplified_mf,
            foldChange=foldChanges,
            showCategory = show10,
            cex_label_gene=0.3)
   
-  upsetplot(enrich_go_mf)
-  heatplot(simplified_mf, foldChange=foldChanges, showCategory = show10)
+  enrich_go_mf_upset <- enrich_go_mf
+  enrich_go_mf_upset@result$Description <- str_trunc(enrich_go_mf_upset@result$Description, width = 50)
+  plot3 <- upsetplot(enrich_go_mf_upset)
+  plot4 <- enrichplot::heatplot(simplified_mf, foldChange=foldChanges, showCategory = show10) +
+    scale_y_discrete(labels = function(x) stringr::str_trunc(x, width = 50))
+  
+  print(plot1)
+  print(plot2)
+  print(plot3)
+  print(plot4)
 } else { print("No significantly enriched terms using criteria selected") }
 ```
 
@@ -1722,7 +1736,7 @@ if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 
 ```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
 if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
-  clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
+  plot1 <- clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
      theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
   
@@ -1740,13 +1754,21 @@ if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   show5 <- simplified_cc_filt$Description[1:5] # Top 5
   show10 <- simplified_cc_filt$Description[1:10] # Top 10
   
-  cnetplot(simplified_cc,
+  plot2 <- cnetplot(simplified_cc,
            foldChange=foldChanges,
            showCategory = show10,
            cex_label_gene=0.3)
   
-  upsetplot(enrich_go_cc)
-  heatplot(simplified_cc, foldChange=foldChanges, showCategory = show10)
+  enrich_go_cc_upset <- enrich_go_cc
+  enrich_go_cc_upset@result$Description <- str_trunc(enrich_go_cc_upset@result$Description, width = 50)
+  plot3 <- upsetplot(enrich_go_cc_upset)
+  plot4 <- enrichplot::heatplot(simplified_cc, foldChange=foldChanges, showCategory = show10) +
+    scale_y_discrete(labels = function(x) stringr::str_trunc(x, width = 50))
+  
+  print(plot1)
+  print(plot2)
+  print(plot3)
+  print(plot4)
 } else { print("No significantly enriched terms using criteria selected") }
 ```
 
@@ -1787,7 +1809,7 @@ clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
 } else { print("No significantly enriched terms using criteria selected") }
 ```
 
-## WikiPathways: Enrichment by DEGs within each contrast {.tabset}
+## WikiPathways: Enrichment by DEGs within each contrast {.tabset .tabset-fade}
 
 This section uses clusterProfiler `enricher()` to detect enriched gene sets using [WikiPathways](https://www.wikipathways.org/) data.  
 
@@ -1826,9 +1848,9 @@ for (i in seq_along(levels(significantResults$contrast))) {
 
 ```
 
-## GSEA: By contrast {.tabset}
+## GSEA: By contrast {.tabset .tabset-fade}
 
-This section uses clusterProfiler `gseKEGG()` to detect enriched KEGG pathways.
+This section uses clusterProfiler `gseKEGG()` to detect enriched KEGG pathways and enrichplot `gseaplot2` to plot running scores.
 
 ```{r 'gsea_analysis_by_contrast_make_plots', collapse=TRUE}
 plotListGSEA <- list()
@@ -1850,7 +1872,7 @@ kk <- gseKEGG(foldChanges, keyType="ncbi-geneid", organism=kegg_organism)
 gsea_sorted <- kk %>% filter(p.adjust < 0.05) %>% arrange(desc(enrichmentScore))
 if(dim(kk@result)[1] > 0){
   plotListGSEA[[i]] <- ridgeplot(kk)
-  plotListGSEA_escore[[i]] <- clusterProfiler::gseaplot(gsea_sorted, gsea_sorted$ID[1], title=gsea_sorted$Description[1])
+  plotListGSEA_escore[[i]] <- enrichplot::gseaplot2(gsea_sorted, geneSetID = c(seq_along(gsea_sorted$ID)))
 } else {
   plotListGSEA[[i]] <- NA
   plotListGSEA_escore[[i]] <- NA
@@ -1870,7 +1892,7 @@ for (i in seq_along(levels(significantResults$contrast))) {
 }
 ```
 
-## GSEA Enrichment Score Plots: By contrast {.tabset}
+## GSEA Enrichment Score Plots: By contrast {.tabset .tabset-fade}
 
 In this section, only the pathway with the top enrichment score is shown (for simplicity). Note that it is possible to plot any pathway of interest by altering the call to `gseaplot`.
 

@@ -24,7 +24,7 @@ inputFile <- file.path(params$projectdir, "Rmd", "DESeq2_report.rnaseq.Rmd")
 
 if(is.na(params$group_facet)){
   # Output file - HTML
-  outFile <- file.path(params$projectdir, paste0("reports/RNASeq_analysis_",
+  outFile <- file.path(params$projectdir, paste0("reports/RNASeq_analysis_", params$project_name, "_",
                                                  format(Sys.time(),'%d-%m-%Y.%H.%M'),".html"))
   rmarkdown::render(input = inputFile,
                     encoding = encoding,
@@ -45,7 +45,7 @@ if(is.na(params$group_facet)){
   for(i in facets){
     message(paste0("Building report for ", i, "..."))
     params$group_filter <- i
-    outFile <- file.path(params$projectdir, paste0("reports/RNASeq_analysis_",
+    outFile <- file.path(params$projectdir, paste0("reports/RNASeq_analysis_", params$project_name, "_",
                                                    i,
                                                    "_",
                                                    format(Sys.time(),'%d-%m-%Y.%H.%M'),".html"))
