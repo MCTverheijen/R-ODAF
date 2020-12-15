@@ -1211,6 +1211,14 @@ names(genes_for_heatmap)[names(genes_for_heatmap) == "genes"] <- biomart_filter
 genes_for_heatmap <- dplyr::left_join(genes_for_heatmap, id_table_entrez,
                                      by=biomart_filter) %>%
   dplyr::distinct()
+  
+genes_for_heatmap[["external_gene_name"]] <- ifelse(is.na(genes_for_heatmap[["external_gene_name"]]),
+               genes_for_heatmap[["ensembl_gene_id"]],
+               genes_for_heatmap[["external_gene_name"]])
+
+genes_for_heatmap[["external_gene_name"]] <- ifelse(genes_for_heatmap[["external_gene_name"]]=="",
+               genes_for_heatmap[["ensembl_gene_id"]],
+               genes_for_heatmap[["external_gene_name"]])
 
 pheatmap(mat_top,
          annotation_col=heatmap_df,
