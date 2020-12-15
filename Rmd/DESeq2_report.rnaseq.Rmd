@@ -12,10 +12,10 @@ output:
     code_download: true
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
-  project_name: "Flame_retardants"     # Change depending on your project name
+  project_name: "Tiparp_TCDD"     # Change depending on your project name
   species: "rat"                # one of human, mouse, rat, hamster
-  design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["group","dose"]           # experimental group of interest plus covariates; can be more than one
+  design: "Group"             # single experimental group of interest; entries in this column must match the contrast names.
+  intgroup: ["Group","Genotype"]           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
   group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
