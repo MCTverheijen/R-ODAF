@@ -3,7 +3,7 @@
 library(tidyverse)
 params <- list()
 params$projectdir <- here::here() # If you open this as an R project, it should find your root directory
-params$project_name <- "Flame_retardants" # Example
+params$project_name <- "Tiparp_TCDD" # Example
 params$species <- "rat"     # one of human, mouse, rat, hamster
 params$design <- "Group"    # single experimental group of interest
 params$intgroup <- c("Group","Genotype") # Can be multiple columns of interest (covariates, etc)
