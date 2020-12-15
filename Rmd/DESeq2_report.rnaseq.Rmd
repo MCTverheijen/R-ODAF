@@ -1255,16 +1255,17 @@ This section contains three groups of MA plots (see [Wikipedia](https://en.wikip
 
 This group of plots shows `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.  
 
+
 ```{r 'MAplotalpha', results='asis'}
 ## MA plot with alpha used in DESeq2::results()
-for (i in 1:length(resList)) {
-contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
-                replacement =  "",
-                x = resList[[i]]@elementMetadata[[2]][2])
-cat("###", contrast, "  \n")
-MA_title <- paste0('MA plot, alpha = ', metadata(resList[[i]])$alpha,', ',contrast)
-DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha, main = str_wrap(MA_title, width=50))
-cat('\n\n')
+for (i in seq_along(resList)) {
+  contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
+                  replacement =  "",
+                  x = resList[[i]]@elementMetadata[[2]][2])
+  cat("###", contrast, "  \n\n")
+  MA_title <- paste0('MA plot, alpha = ', metadata(resList[[i]])$alpha,', ',contrast)
+  DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha, main = str_wrap(MA_title, width=40))
+  cat('  \n\n')
 }
 
 ## Used to have multiple tabsets for MA plots... it was too many MA plots.
@@ -1294,6 +1295,8 @@ cat('\n\n')
 # }
 
 ```
+
+## {-}
 
 # P-values {.tabset .tabset-fade}
 
@@ -1778,7 +1781,7 @@ if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 
 This section uses clusterProfiler to detect enriched gene sets using [WikiPathways](https://www.wikipathways.org/) data.  
 
-```{r 'pathway_analysis', collapse=TRUE}
+```{r 'pathway_analysis', collapse=TRUE, eval=params$run_pathway_analysis}
 entrez_IDs <- as.character(id_table_entrez$entrezgene_id)
 entrezDEGs <- dplyr::left_join(significantResults,
                                id_table_entrez,
@@ -1813,7 +1816,7 @@ clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
 
 This section uses clusterProfiler `enricher()` to detect enriched gene sets using [WikiPathways](https://www.wikipathways.org/) data.  
 
-```{r 'pathway_analysis_by_contrast_make_plots', collapse=TRUE}
+```{r 'pathway_analysis_by_contrast_make_plots', collapse=TRUE, eval=params$run_pathway_analysis}
 plotList <- list()
 for (i in seq_along(levels(significantResults$contrast))) {
   entrezDEGs <- dplyr::left_join(significantResults %>% filter(contrast==levels(significantResults$contrast)[i]),
@@ -1839,11 +1842,11 @@ for (i in seq_along(levels(significantResults$contrast))) {
 }
 ```
 
-```{r 'pathway_analysis_by_contrast_print_plots', results='asis'}
+```{r 'pathway_analysis_by_contrast_print_plots', results='asis', eval=params$run_pathway_analysis}
 for (i in seq_along(levels(significantResults$contrast))) {
-  cat("###", levels(significantResults$contrast)[i], " \n")
+  cat("###", levels(significantResults$contrast)[i], "  \n\n")
   if(any(!is.na(plotList[[i]]))) {print(plotList[[i]])} else {print("No pathway perturbations were detected within this contrast.")}
-  cat('\n\n')
+  cat('  \n\n')
 }
 
 ```
@@ -1852,7 +1855,7 @@ for (i in seq_along(levels(significantResults$contrast))) {
 
 This section uses clusterProfiler `gseKEGG()` to detect enriched KEGG pathways and enrichplot `gseaplot2` to plot running scores.
 
-```{r 'gsea_analysis_by_contrast_make_plots', collapse=TRUE}
+```{r 'gsea_analysis_by_contrast_make_plots', collapse=TRUE, eval=params$run_pathway_analysis}
 plotListGSEA <- list()
 plotListGSEA_escore <- list()
 for (i in seq_along(levels(significantResults$contrast))) {
@@ -1880,15 +1883,15 @@ if(dim(kk@result)[1] > 0){
 }
 ```
 
-```{r 'gsea_analysis_by_contrast_print_plots', results='asis'}
+```{r 'gsea_analysis_by_contrast_print_plots', results='asis', eval=params$run_pathway_analysis}
 for (i in seq_along(levels(significantResults$contrast))) {
-  cat("###", levels(significantResults$contrast)[i], " \n")
+  cat("###", levels(significantResults$contrast)[i], "  \n\n")
   if(any(!is.na(plotListGSEA[[i]]))) {
     print(plotListGSEA[[i]])
   } else {
     print("No pathway perturbations were detected within this contrast.")
   }
-  cat('\n\n')
+  cat('  \n\n')
 }
 ```
 
@@ -1896,15 +1899,15 @@ for (i in seq_along(levels(significantResults$contrast))) {
 
 In this section, only the pathway with the top enrichment score is shown (for simplicity). Note that it is possible to plot any pathway of interest by altering the call to `gseaplot`.
 
-```{r 'gsea_scores_plot', results='asis'}
+```{r 'gsea_scores_plot', results='asis', eval=params$run_pathway_analysis}
 for (i in 1:length(levels(significantResults$contrast))) {
-  cat("###", levels(significantResults$contrast)[i], " \n")
+  cat("###", levels(significantResults$contrast)[i], "  \n\n")
   if(any(!is.na(plotListGSEA_escore[[i]]))) {
     print(plotListGSEA_escore[[i]])
   } else {
     print("No pathway perturbations were detected within this contrast.")
   }
-  cat('\n\n')
+  cat('  \n\n')
 }
 ```
 
