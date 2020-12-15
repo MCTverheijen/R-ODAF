@@ -85,7 +85,8 @@ if (flag==FALSE) { load(paste0(params$projectdir,"Partial_analysis.RData")) }
 # Set this variable to TRUE if you would like to embed the files directly into the HTML for portability. This slows down page responsiveness drastically, since the files are generally quite large.
 embedFiles=FALSE
 # Se this variable to be TRUE if you want to have separate plots of top genes as defined in the R-ODAF template
-R_ODAF_plots=FALSE 
+R_ODAF_plots=FALSE
+pathway_analysis <- file.path(paths$root,"Rmd/Pathway_analysis.Rmd")
 ```
 
 ```{r 'warn_user', eval=!flag}
@@ -1776,7 +1777,7 @@ if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 } else { print("No significantly enriched terms using criteria selected") }
 ```
 
-```{r run_pathway_analysis_child_document, child='/Rmd/Pathway_analysis.Rmd', eval = params$run_pathway_analysis}
+```{r run_pathway_analysis_child_document, child=pathway_analysis, eval = params$run_pathway_analysis}
 ```
 
 # Methods Summary
