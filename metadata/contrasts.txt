@@ -1,6 +1,0 @@
-male_2	male_0
-male_1000	male_0
-male_5000	male_0
-female_2	female_0
-female_1000	female_0
-female_5000	female_0

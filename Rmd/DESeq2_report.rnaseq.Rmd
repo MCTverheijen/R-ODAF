@@ -12,21 +12,21 @@ output:
     code_download: true
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
-  project_name: "Flame_Retardants"     # Change depending on your project name
-  species: "rat"                # one of human, mouse, rat, hamster
+  project_name: "Bisphenols"     # Change depending on your project name
+  species: "human"                # one of human, mouse, rat, hamster
   design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
   intgroup: ["group","dose"]           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
-  platform: "RNA-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: !r NA           # Which group will this report be done on?
+  platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
+  group_facet: "chemical"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: "Bis (4-chorophenyl) Sulfone"           # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
   include_only_group: !r NA # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
-  run_pathway_analysis: FALSE # Optionally exclude wikipathways analysis - for example if no data is available for your species
+  run_pathway_analysis: TRUE # Optionally disable pathway analysis if not available for your organism
 ---
 
 ***
@@ -1727,10 +1727,12 @@ if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   show5 <- simplified_mf_filt$Description[1:5] # Top 5
   show10 <- simplified_mf_filt$Description[1:10] # Top 10
   
+  if(nrow(simplified_mf) > 1) {
   plot2 <- cnetplot(simplified_mf,
            foldChange=foldChanges,
            showCategory = show10,
            cex_label_gene=0.3)
+  }
   
   enrich_go_mf_upset <- enrich_go_mf
   enrich_go_mf_upset@result$Description <- str_trunc(enrich_go_mf_upset@result$Description, width = 50)
@@ -1739,7 +1741,7 @@ if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
     scale_y_discrete(labels = function(x) stringr::str_trunc(x, width = 50))
   
   print(plot1)
-  print(plot2)
+  if(nrow(simplified_mf) > 1) {print(plot2)} else {print("Network plot not shown due to a limited number of enriched terms.")}
   print(plot3)
   print(plot4)
 } else { print("No significantly enriched terms using criteria selected") }
