@@ -49,7 +49,7 @@ if(is.na(params$group_facet)){
     pull(params$group_facet) %>% 
     unique() # remove params$exclude_groups
   message(paste0("Making multiple reports based on ", params$group_facet ,"..."))
-  for(i in facets[12:length(facets)]){
+  for(i in facets){
     message(paste0("Building report for ", i, "..."))
     params$group_filter <- i
     outFile <- file.path(params$projectdir, paste0("reports/RNASeq_analysis_", params$project_name, "_",

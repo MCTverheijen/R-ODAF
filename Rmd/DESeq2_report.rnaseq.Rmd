@@ -1,15 +1,4 @@
 ---
-title: "Transcriptome Profiling"
-author: "Matthew J. Meier"
-subtitle: "RNASeq Analysis"
-output:
-  html_document:
-    toc: true
-    toc_float: true
-    number_sections: true
-    code_folding: hide
-    theme: spacelab           # flatly spacelab sandstone cerulean
-    code_download: true
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
   project_name: "Bisphenols"     # Change depending on your project name
@@ -27,6 +16,17 @@ params:
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
   run_pathway_analysis: TRUE # Optionally disable pathway analysis if not available for your organism
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    theme: spacelab           # flatly spacelab sandstone cerulean
+    code_download: true
+title: "`r paste('Transcriptome analysis:', gsub(pattern='_', replacement = ' ', x=params$project_name))`"
+subtitle: "`r paste(params$platform, 'analysis', ifelse(!is.null(params$group_filter), paste('for', params$group_filter), ''))`"
+author: "Matthew J. Meier"
 ---
 
 ***
