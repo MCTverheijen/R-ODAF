@@ -37,7 +37,7 @@ if(is.na(params$group_facet)){
                     params = params,
                     envir = new.env())
 } else {
-  SampleKeyFile <- file.path(params$projectdir,"metadata/metadata.txt")
+  SampleKeyFile <- file.path(params$projectdir,"metadata/metadata.QC_applied.txt")
   DESeqDesign <- read.delim(SampleKeyFile,
                             stringsAsFactors=FALSE,
                             sep="\t",

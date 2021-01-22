@@ -1,0 +1,423 @@
+---
+output:
+  html_document:
+  toc: true
+  toc_float: true
+  number_sections: true
+  code_folding: show
+  theme: spacelab # flatly spacelab sandstone cerulean
+  code_download: true
+title: "Study-wide sample quality control"
+subtitle: "Bisphenols Study"
+author: "Matthew J. Meier"
+---
+
+
+Modified from code provided by Andrew Williams (Health Canada) and recommendations from Joshua Harrill (US EPA).  
+
+This should be run prior to DEG/BMD analysis to remove any suspect samples from across the entire study.  
+
+```{r parameters}
+############################################################################
+# Parameters (cutoffs)
+############################################################################
+tree_height_cutoff=0.1 # For clustering
+nmr_threshold=100000 # 10% of 1M reads for TempOSeq
+sampledata_sep="," # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
+```
+
+```{r load_libraries, message=F, warnings=F, echo=F}
+############################################################################
+# Libraries
+############################################################################
+library(edgeR)
+library(cluster)
+library(Cairo)
+library(sfsmisc)
+library(fields)
+library(heatmap3)
+library(DESeq2)
+library(tidyverse)
+library(foreach)
+library(doParallel)
+library(UpSetR)
+library(kableExtra)
+```
+
+```{r paths}
+############################################################################
+# File paths in project directory
+############################################################################
+paths <- list()
+paths$root <- here::here()
+paths$data <- paste0(paths$root, "/data")
+paths$output <- paste0(paths$data, "/output")
+paths$processed <- paste0(paths$data, "/processed")
+paths$metadata <- paste0(paths$root, "/metadata")
+paths$reports <- paste0(paths$root, "/reports")
+
+knitr::opts_knit$set(root.dir = paths$root)
+
+```
+
+```{r load_files, message=F, results="hide"}
+############################################################################
+# FILES TO LOAD
+############################################################################
+
+# A. Tab delimited file with merged RSEM.genes.results files:
+SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
+
+# B. Tab delimited sample information file with at least 2 columns:
+#    1. sample names identical to the column names of sampleData
+#    2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
+SampleKeyFile <- file.path(paths$metadata, "metadata.txt")
+
+# Load input files
+sampleData <- read.delim(SampleDataFile,
+                         sep=sampledata_sep,
+                         stringsAsFactors=FALSE,
+                         header=TRUE, 
+                         quote="\"",
+                         row.names=1,
+                         check.names=FALSE)
+
+DESeqDesign <- read.delim(SampleKeyFile,
+                          stringsAsFactors=FALSE,
+                          sep="\t",
+                          header=TRUE,
+                          quote="\"",
+                          row.names=NULL)
+
+DESeqDesign$original_names <- DESeqDesign[,1]
+
+############################################################################
+# Arrange tables by sample names
+############################################################################
+
+sampleData <- sampleData %>% dplyr::relocate(colnames(sampleData) %>% sort())
+ncol(sampleData)
+
+#design
+d <- DESeqDesign
+d <- d %>% dplyr::arrange(original_names)
+nrow(d)
+
+############################################################################
+#Checking row and column orderings
+############################################################################
+names(sampleData) == d$original_names
+```
+
+# Sample Filtering Code
+
+```{r read-count-filter-not-used, echo=F, eval=F}
+############################################################################
+# Filter by median read counts per gene per group
+############################################################################
+# Nominally, this is done for the groups under consideration instead.
+# Done for each contrast within the RMarkdown script,
+# so no need to run it here.
+# 
+# group <- unique(d$group)
+# group <- group[order(group)]
+# 
+# #Way too many groups, lets use some parallel computing on this
+# #okay this is much faster
+# 
+# cores=detectCores()
+# cl <- makeCluster(cores[1]-1) #not to overload your computer
+# registerDoParallel(cl)
+# medcounts <- foreach(k = 1:length(group), .combine = cbind) %dopar%
+#   apply(sampleData[,d$group == group[k]], 1, median)
+# 
+# stopCluster(cl)
+# 
+# gene_flag <- apply(medcounts, 1, max)
+# quantile(gene_flag, probs = seq(0.1, 0.5, by = 0.1))
+# 
+# gene_flag <- gene_flag > 5
+# 
+# nrow(sampleData)
+# sampleData <- sampleData[gene_flag,]
+# p <- row.names(sampleData)
+# nrow(sampleData)
+# 
+```
+
+## Dendogram (before filtering)
+
+A tree height cutoff of `r tree_height_cutoff` is used to cut the tree and separate outliers.
+
+```{r dendogram_clustering}
+############################################################################
+#Re-order the data by group
+############################################################################
+flag_order <- order(d$group)
+d <- d[flag_order,]
+sampleData <- sampleData[,flag_order]
+
+############################################################################
+# CPM (used in dendogram/cluster analysis)
+############################################################################
+libsize <- apply(sampleData, 2, sum)
+cpm <- sampleData
+for(k in 1:length(libsize)){
+  cpm[,k] <- log2((10^6)*(sampleData[,k] + 0.5)/(libsize[k] + 1))
+}
+
+############################################################################
+# Dendrogram
+############################################################################
+CairoPDF(file = file.path(paths$processed, "dendrogram_before_filtering.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+A <- 1-cor(as.matrix(cpm), method = "spearman")
+A <- hclust(as.dist(A), method="average")
+
+dend1 <- as.dendrogram(A)
+par(cex=0.2, mar = c(15, 4, 4, 2))
+
+plot(dend1, main="log2 CPM")
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+
+tree_groups <- cutree(A, h = tree_height_cutoff)
+n <- table(tree_groups)
+n <- n[n == 1]
+
+if(length(n > 0)){
+  flag_cluster <- d$original_names %in% names(tree_groups[tree_groups %in% as.integer(names(n))])
+  write.table(d[flag_cluster,],
+              file.path(paths$processed, "outliers_cluster_analysis.txt"),
+              sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+  d$group[flag_cluster]
+}
+```
+
+## Additional QC metrics
+
+
+### Number of mapped reads
+
+Samples less than `r nmr_threshold` aligned reads removed.
+
+```{r num_mapped_reads}
+######################################################################################
+# Additional QC Metrics
+######################################################################################
+# NMR Number of mapped reads, defined as sum of total read counts summed over all detected probes
+######################################################################################
+# Reject < 300000 or Threshold = 10% of target depth
+# Removes various types of failed samples
+
+QAQC <- data.frame(Sample = names(sampleData), NMR = apply(sampleData, 2, sum))
+failed_read_threshold <- QAQC[QAQC$NMR < nmr_threshold,]
+
+# Samples failing
+d %>%
+  dplyr::filter(original_names %in% failed_read_threshold$Sample) %>%
+  dplyr::pull(group)
+
+```
+
+### Number of active probes
+
+The number of probes having >5 uniquely mapped reads are calculated. Outliers on that metric (i.e., outside 3XIQR) are removed from analysis.
+
+```{r ncov5}
+######################################################################################
+# Ncov5 The number of probes with at least 5 uniquely mapped reads.
+######################################################################################
+# Tukey's Outer Fence cutoff - 3*IQR
+n_samples <- nrow(sampleData)
+QAQC$Ncov5 <- apply(sampleData, 2, function(x) length(x[x > 4]))/n_samples
+percent_active_probes <- boxplot(QAQC$Ncov5, range=3)
+failed_Ncov5 <- QAQC[QAQC$Ncov5 < percent_active_probes$stats[1,1],]
+
+# Samples failing
+d %>%
+  dplyr::filter(original_names %in% failed_Ncov5$Sample) %>%
+  dplyr::pull(group)
+```
+
+### Number of probes capturing 80% of signal
+
+The number of probes capturing 80% of the signal is first calculated, and samples falling outside of 3X IQR are removed from downstream analysis.
+
+```{r nsig80}
+######################################################################################
+# Nsig80 - The number of probes capturing the top 80% of signal in a sample.
+######################################################################################
+# Tukey's Outer Fence cutoff - 3*IQR
+# (include test samples, vehicle controls, and reference chemical treatments)
+ref <- apply(sampleData/QAQC$NMR, 2, median)
+sig80 <- quantile(ref, prob = 0.8)
+
+QAQC$Nsig80 <- 0
+
+for(k in 1:nrow(QAQC)){
+  flag80pct <- sampleData[,k] > sig80 * QAQC$NMR[k]
+  QAQC$Nsig80[k] <- length(sampleData[flag80pct, 1])/n_samples
+}
+
+probes_capturing_top_80 <- boxplot(QAQC$Nsig80, range=3)
+failed_Nsig80 <- QAQC[QAQC$Nsig80 < probes_capturing_top_80$stats[1,1],]
+
+# Samples failing
+d %>%
+  dplyr::filter(original_names %in% failed_Nsig80$Sample) %>%
+  dplyr::pull(group)
+
+```
+
+### Gini coefficient
+
+The Gini coefficient is computed for each sample based on the distribution of raw counts for all probes including those with 0 aligned reads. Samples with Gini coefficients >0.95 are removed from the analysis.
+
+```{r gini}
+######################################################################################
+# Gini coefficient - Gini coefficient computed for each sample based on the distribution of 
+# raw counts for all probes including those with 0 aligned reads
+######################################################################################
+# Reject > 0.95
+QAQC$Gini <- apply(sampleData, 2, function(x) gini(x))
+failed_gini <- QAQC[QAQC$Gini > 0.95,]
+
+# Samples failing
+d %>%
+  dplyr::filter(original_names %in% failed_gini$Sample) %>%
+  dplyr::pull(group)
+```
+
+# Write QC data to disk
+
+```{r return_data}
+
+######################################################################################
+# Add Dendogram Clustering Pass/Fail to QAQC
+######################################################################################
+QAQC$Denodogram <- "PASS"
+QAQC$Denodogram[which(QAQC$Sample %in% d$original_names[flag_cluster])] <- "FAIL"
+
+failed_dendo_clustering <- QAQC[QAQC$Denodogram == "FAIL",]
+
+# Samples failing
+d %>%
+  dplyr::filter(original_names %in% failed_dendo_clustering$Sample) %>%
+  dplyr::pull(group)
+
+############################################################################
+# Removing Outliers
+############################################################################
+QAQC_pass_fail <- QAQC
+QAQC_pass_fail[QAQC$NMR < nmr_threshold,]$NMR <- "FAIL"
+QAQC_pass_fail[QAQC$NMR >= nmr_threshold,]$NMR <- "PASS"
+QAQC_pass_fail[QAQC$Ncov5 < percent_active_probes$stats[1,1],]$Ncov5 <- "FAIL"
+QAQC_pass_fail[QAQC$Ncov5 >= percent_active_probes$stats[1,1],]$Ncov5 <- "PASS"
+QAQC_pass_fail[QAQC$Nsig80 < probes_capturing_top_80$stats[1,1],]$Nsig80 <- "FAIL"
+QAQC_pass_fail[QAQC$Nsig80 >= probes_capturing_top_80$stats[1,1],]$Nsig80 <- "PASS"
+QAQC_pass_fail[QAQC$Gini > 0.95,]$Gini <- "FAIL"
+QAQC_pass_fail[QAQC$Gini <= 0.95,]$Gini <- "PASS"
+  
+QAQC_failed <- QAQC_pass_fail %>%
+  dplyr::rowwise() %>% 
+  dplyr::filter_all(any_vars(str_detect(., pattern = "FAIL")))
+
+QAQC_failed_logical <- as.data.frame(QAQC_failed)
+QAQC_failed_logical[QAQC_failed_logical=="FAIL"] <- 1
+QAQC_failed_logical[QAQC_failed_logical=="PASS"] <- 0
+#apply(QAQC_failed_logical_matrix, 2, as.numeric)
+
+QAQC_failed_logical <- QAQC_failed_logical %>%
+  dplyr::left_join(d %>% dplyr::select(original_names, group),
+                   by=(c("Sample"="original_names"))) %>%
+  dplyr::mutate_if(is.character, as.numeric)
+
+```
+
+# Tables and plots
+
+This section shows several tables of the outlier data.  
+
+
+## UpSet Plot of Outliers
+
+This plot shows the various QC metrics that may result in sample removal, along with the numbers of samples that were removed for one or more of those filters.
+
+```{r upset}
+
+upset(QAQC_failed_logical)
+
+outliers <- QAQC_failed$Sample
+outliers
+
+flag_outliers <- d$original_names %in% outliers
+outlier_metadata <- d[flag_outliers,]
+metadata_outliers_removed <- DESeqDesign[!flag_outliers,]
+
+```
+
+
+## Metadata of samples identified as outliers
+
+```{r table_metadata}
+
+knitr::kable(outlier_metadata,
+             caption="Samples Removed") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  kableExtra::scroll_box(width = "100%", height = "480px")
+
+QAQC_failed_kable <- outlier_metadata %>%
+  dplyr::select(original_names, group) %>%
+  left_join(QAQC_failed, by=(c("original_names"="Sample")))
+
+```
+
+## Pass/fail table for samples identified as outliers
+
+```{r table_pass_fail}
+
+knitr::kable(QAQC_failed_kable,
+             caption="Reasons for sample removal") %>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  scroll_box(width = "100%", height = "480px")
+
+write.table(outlier_metadata,
+            file.path(paths$processed, "samples_removed.txt"),
+            sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+
+write.table(metadata_outliers_removed,
+            file.path(paths$metadata, "metadata.QC_applied.txt"),
+            sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+
+d_filtered <- d[!(flag_outliers),]
+sampleData_filtered <- sampleData %>% dplyr::select(-all_of(outliers))
+ncol(sampleData_filtered)
+
+```
+
+## Dendogram (after filtering)
+
+```{r dendogram_after}
+############################################################################
+# Dendogram After Removing Outliers
+############################################################################
+cpm_outliers_removed <- cpm %>% dplyr::select(-all_of(outliers))
+CairoPDF(file = file.path(paths$processed, "dendrogram_after_filtering.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+B <- 1-cor(as.matrix(cpm_outliers_removed), method = "spearman")
+B <- hclust(as.dist(B), method="average")
+
+dend_after <- as.dendrogram(B)
+par(cex=0.2, mar = c(15, 4, 4, 2))
+
+plot(dend_after, main="log2 CPM")
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+```

@@ -8,7 +8,7 @@ params:
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
   group_facet: "chemical"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: "Bis (4-chorophenyl) Sulfone"           # Which group will this report be done on?
+  group_filter: "BPC (Bisphenol C)"           # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
@@ -24,6 +24,7 @@ output:
     code_folding: hide
     theme: spacelab           # flatly spacelab sandstone cerulean
     code_download: true
+bibliography: "`r file.path(params$projectdir, 'Rmd/references.bib')`"
 title: "`r paste('Transcriptome analysis:', gsub(pattern='_', replacement = ' ', x=params$project_name))`"
 subtitle: "`r paste(params$platform, 'analysis', ifelse(!is.null(params$group_filter), paste('for', params$group_filter), ''))`"
 author: "Matthew J. Meier"
@@ -139,7 +140,7 @@ if(species=="human"){
   ensembl_species <- "hsapiens_gene_ensembl"
   species_gene_symbol <- "external_gene_name"
   kegg_organism <- "hsa"
-  temposeq_manifest <- "191113_Human_S1500_Surrogate_2.0_Manifest.csv" # or 191004 Human Whole Transcriptome 2.0 Manifest.xlsx
+  temposeq_manifest <- "191004_Human_Whole_Transcriptome_2.0_Manifest.txt" # options: "191113_Human_S1500_Surrogate_2.0_Manifest.csv" "191004_Human_Whole_Transcriptome_2.0_Manifest.txt"
 } else {
     if(species=="mouse"){
       # Mouse:
@@ -204,7 +205,7 @@ SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
 # B. Tab delimited sample information file with at least 2 columns:
   # 1. sample names identical to the column names of sampleData
   # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
-SampleKeyFile <- file.path(paths$metadata,"metadata.txt")
+SampleKeyFile <- file.path(paths$metadata,"metadata.QC_applied.txt")
 # C. Tab delimited file of comparisons (contrasts) to test 
 # Group of interest in the left column, control for comparison in the right column
 ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
@@ -289,6 +290,13 @@ if(!is.na(params$include_only_column) & !is.na(params$include_only_group)) {
   contrasts <- contrasts %>% dplyr::filter(V1 %in% limit_contrasts)
 }
 
+# If there is a dose column, reorder the contrast list by dose
+# Not necessary by default but might be useful.
+#if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
+#  doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
+#  contrasts <- contrasts # figure out how you want to reorder
+#}
+
 # Create directories
 plotdir <- paste(paths$DEG_output, "/plots/", sep="")
 if(!dir.exists(plotdir)) {dir.create(plotdir, recursive = TRUE)}
@@ -303,7 +311,7 @@ if (Platform=="RNA-Seq"){
   linear_fc_filter = 1.5
   biomart_filter="ensembl_gene_id"
 } else if (Platform=="TempO-Seq") {
-  threshold = 100000 # Number of aligned reads per sample required
+  threshold = 1000000 # Number of aligned reads per sample required
   MinCount<- 0.5
   alpha <- pAdjValue <- 0.05 
   linear_fc_filter = 1.5
@@ -317,14 +325,23 @@ if (Platform=="RNA-Seq"){
   biospyder_annos <- biospyder %>% dplyr::select(PROBE_NAME, ENSEMBL_GENE_ID, GENE_SYMBOL)
   sampleData$PROBE_NAME <- row.names(sampleData)
   sampleData <- sampleData %>%
-    mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", "")) %>%
-    dplyr::group_by(GENE_SYMBOL) %>%
-    dplyr::summarise_if(.predicate = function(x) is.numeric(x),
-                        .funs = c("sum")) %>%
-    ungroup()
+    mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", ""))
+
+sampleDataTable <- data.table(sampleData %>% dplyr::select(-PROBE_NAME))
+sampleData <- sampleDataTable[, lapply(.SD,sum), by="GENE_SYMBOL"]
+ 
+  # sampleData <- sampleData %>%
+  #   mutate(GENE_SYMBOL = str_replace(PROBE_NAME, "_.*", "")) %>%
+  #   dplyr::group_by(GENE_SYMBOL) %>%
+  #   dplyr::summarise_if(.predicate = function(x) is.numeric(x),
+  #                       .funs = c("sum")) %>%
+  #   ungroup()
   sampleData <- as.data.frame(sampleData)
   row.names(sampleData) <- sampleData$GENE_SYMBOL
   sampleData <- sampleData[,-1]
+  # 
+  
+  
   # biospyder %>% select(ENSEMBL_GENE_ID) %>% distinct() %>% count()
   # sampleData <- sampleData[row.names(sampleData) %in% biospyder$ENSEMBL_GENE_ID,] # If aligned to hg38...
 } else { 
@@ -345,7 +362,6 @@ knitr::kable(contrasts,
   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
   scroll_box(height = "480px")
 ```
-
 
 ## Run DESeq2
 
@@ -414,9 +430,12 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.na(params$group_facet)
       dds <- dds[rowSums(counts(dds)) > 1]
       dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(params$cpus))
       if(is.na(params$group_facet)) {
-        save(dds, file=file.path(paths$RData, "dds.RData"))
+        save(dds,
+             file=file.path(paths$RData, "dds.RData"))
+             
       } else {
-        save(dds, file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
+        save(dds,
+             file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
       }
     }
 }
@@ -442,15 +461,23 @@ rld <- vst(dds) # Should this be blind?
 
 The code above (not shown by default) uses DESeq2 `r packageVersion("DESeq2")` to test for deferentially abundant genes within the `r Platform` data.  
 
+# Quality control
+
+A study-wide quality control script removes samples that cluster at a distance greater than a specified cutoff, samples that are noisy, and samples that do not have sufficient aligned reads. **More details are available in a separate report.**  
+
+Within this report, gene/probe-level quality control is performed below ("Run pairwise comparisons" section).
+
 Prior to running DESeq2, the data was filtered to remove samples that do not have $`r threshold`$ reads per sample.  
 
-The user-provided metadata initially included `r samples_before` samples.  
+The metadata used for this report included `r samples_before` samples.  
 
 The count matrix initially included `r initialSampleDataCount` samples (including any reference material samples). After removing samples with less than $`r threshold`$ reads, `r filteredSampleDataCount` samples were left. It is `r metadata_in_sampledata` that all the samples provided in the metadata table were also identified in the count matrix. It is `r sampledata_in_metadata` that all the samples in the count matrix were also identified in the metadata table.  
 
-Following the removal of other samples (i.e., reference RNA, etc.), there were `r samples_after` samples remaining in the experiment. The samples excluded from analysis are shown in the table in the section titled "Sample data", along with complete sample metadata for the experiment.    
+There were `r samples_after` samples passing all thresholds. **The samples excluded from analysis are shown in the table in the section titled "Sample data", below, along with complete sample metadata for the experiment.**    
 
 ## Sample data (metadata about your experiment) {.tabset .tabset-fade}
+
+**Some samples may already have been removed in study-wide QC.**
 
 ### Samples used in this report
 
@@ -460,7 +487,9 @@ This table shows the final list of samples that were used in the data analysis (
 # Conditionally sort by dose if that column name is present
 if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
   doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
-  knitr::kable(DESeqDesign %>% group_by(!!sym(params$design)) %>% arrange(doseCol, .by_group = T),
+  knitr::kable(DESeqDesign %>%
+                 group_by(!!sym(params$design)) %>%
+                 arrange(!!sym(colnames(DESeqDesign)[doseCol])),
              row.names =  F,
              caption="Samples and corresponding experimental conditions used in this report") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
@@ -505,7 +534,7 @@ knitr::kable(DESeqDesignAsRead %>%
 
 ### Original sample metadata as provided
 
-This table shows the original sample metadata including any samples that were removed within this report.
+This table shows the original sample metadata including any samples that were removed within this report.  **Note that some samples may already have been removed in study-wide QC before loading this metadata.**
 
 ```{r print_metadata_provided}
 # Conditionally sort by dose if that column name is present?
@@ -522,6 +551,32 @@ knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
   scroll_box(width = "100%", height = "480px")
 ```
+
+## Read count plots
+
+This section shows the number of reads obtained for sample groups included in the report.  
+
+```{r read-counts, out.width = "50%", warning = FALSE}
+
+smpInfo = DESeqDesign
+temp4plot = data.frame(reads=round(colSums(sampleData),3))
+temp4plot$original_names <- row.names(temp4plot)
+
+temp4plot_annotated <- dplyr::left_join(smpInfo, temp4plot)
+
+ggplot(temp4plot_annotated,
+       aes(x=!!sym(params$design),
+           y=reads)) +
+  geom_boxplot() +
+  geom_jitter(size=0.3, alpha=0.5, color="blue") +
+  coord_flip() +
+  expand_limits(y = 0) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE))
+
+```
+
+# Testing for differentially expressed genes
 
 ## Load R-ODAF functions
 
@@ -745,9 +800,10 @@ for (i in 1:length(resList)) {
 sigtabList <- sigtabList[!sapply(sigtabList, is.null)]
 significantResults <- rbindlist(sigtabList)
 significantResults <- dplyr::distinct(significantResults)
-significantResults$contrast <- factor(significantResults$contrast)
+significantResults <- significantResults %>% dplyr::mutate(contrast =  as_factor(contrast))
 # All results including non-significant
 allResults <- rbindlist(alltablList)
+allResults <- allResults %>% dplyr::mutate(contrast =  as_factor(contrast))
 
 # All Results for Plotting
 # Replace NA gene symbols with ensembl ID
@@ -764,7 +820,7 @@ allResultsOrdered_logFC_filter <- dplyr::filter(allResults, abs(linearFoldChange
 allResultsOrdered_logFC_filter <- dplyr::filter(allResultsOrdered_logFC_filter, padj < alpha)
 res.df <- allResultsOrdered_logFC_filter
 
-degTable <- significantResults %>% 
+degTable <- significantResults %>%
   dplyr::group_by(contrast) %>%
   dplyr::count()
 
@@ -832,6 +888,7 @@ colPositionsOfData <- ncol(summaryTable) - numColsToPrepend
 summaryTable <- summaryTable[,c(1,
                                 colPositionsToPrependSTART:ncol(summaryTable),
                                 2:colPositionsOfData)]
+summaryTable <- summaryTable %>% dplyr::distinct() # Just in case duplicates snuck by
 
 CPMddsDF <- data.frame(genes = row.names(CPMdds), CPMdds, check.names=F)
 CPMddsDF <- dplyr::left_join(CPMddsDF, id_table, by=c("genes" = biomart_filter))
@@ -1046,31 +1103,31 @@ if(is.na(params$group_facet)) {
 
 # PCA Plots {.tabset .tabset-fade}
 
-## All genes, before filtering
+## All `r nrow(assay(rld))` genes, before filtering
 
 ```{r 'PCA'}
 ## Perform PCA analysis and make plot
-plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld))) + 
+plotPCA(rld, intgroup = params$design, ntop=nrow(assay(rld))) + 
   theme(legend.position = "bottom") +
-  guides(fill=guide_legend(ncol=3))
+  guides(color=guide_legend(ncol=3))
 ## Get percent of variance explained
-data_pca <- plotPCA(rld, intgroup = params$intgroup, ntop=nrow(assay(rld)), returnData = TRUE)
+data_pca <- plotPCA(rld, intgroup = params$design, ntop=nrow(assay(rld)), returnData = TRUE)
 percentVar <- round(100 * attr(data_pca, "percentVar"))
 
 ```
 
 This plot shows the first two principal components that explain the variability in the data using the regularized log count data. If you are unfamiliar with principal component analysis, you might want to check the [Wikipedia entry](https://en.wikipedia.org/wiki/Principal_component_analysis) or this [interactive explanation](http://setosa.io/ev/principal-component-analysis/). In this case, the first and second principal component explain `r percentVar[1]` and `r percentVar[2]` percent of the variance respectively.
 
-## DEGs only
+## DEGs only (`r length(unique(significantResults[[biomart_filter]]))` genes)
 
 ```{r 'PCA_DEGs'}
 rld_degs <- rld[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]  # d[ d[[THECOLUMN]] == someValue , ]
 
 ## Perform PCA analysis and make plot
-plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs)) +
+plotPCA(rld_degs, intgroup = params$design, ntop=nrow(rld_degs)) +
   theme(legend.position = "bottom") +
-  guides(fill=guide_legend(ncol=3))
-PCAplotDEGs <- plotPCA(rld_degs, intgroup = params$intgroup, ntop=nrow(rld_degs), returnData = TRUE)
+  guides(color=guide_legend(ncol=3))
+PCAplotDEGs <- plotPCA(rld_degs, intgroup = params$design, ntop=nrow(rld_degs), returnData = TRUE)
 
 ## Get percent of variance explained
 percentVarDEGs <- round(100 * attr(PCAplotDEGs, "percentVar"))
@@ -1089,12 +1146,12 @@ select = order(rv, decreasing = TRUE)[1:nBest]
 rld_top <- rld[select,]
 
 ## Perform PCA analysis and make plot
-plotPCA(rld_top, intgroup = params$intgroup, ntop=nrow(rld_top)) + 
+plotPCA(rld_top, intgroup = params$design, ntop=nrow(rld_top)) + 
   theme(legend.position = "bottom") +
-  guides(fill=guide_legend(ncol=3))
+  guides(color=guide_legend(ncol=3))
 
 ## Get percent of variance explained
-data_pcaTop <- plotPCA(rld_top, intgroup = params$intgroup, returnData = TRUE, ntop=nrow(rld_top))
+data_pcaTop <- plotPCA(rld_top, intgroup = params$design, returnData = TRUE, ntop=nrow(rld_top))
 percentVarTop <- round(100 * attr(data_pcaTop, "percentVar"))
 ```
 
@@ -1102,29 +1159,36 @@ This plot shows the principal components analysis limited to all DEGs. In this c
 
 # Sample-to-sample distances {.tabset .tabset-fade}
 
-## All genes, before filtering
+## All `r nrow(assay(rld))` genes, before filtering
 
 ```{r 'sampleDist', fig.width=10, fig.height=10}
 ## Obtain the sample euclidean distances
 sampleDists <- stats::dist(t(assay(rld)))
 sampleDistMatrix <- as.matrix(sampleDists)
 ## Add names based on intgroup
-rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, params$design]), 1,
+rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
     paste, collapse = ' : ')
-colnames(sampleDistMatrix) <- NULL
+colnames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+    paste, collapse = ' : ')
+
+distances_df <- as.data.frame(colData(rld)[,params$intgroup])
+# apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
 
 ## Define colors to use for the heatmap
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 
 ## Make the heatmap
-pheatmap(sampleDistMatrix, clustering_distance_rows = sampleDists,
-    clustering_distance_cols = sampleDists, color = colors)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         color = colors,
+         annotation_col = distances_df)
 
 ```
 
 This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
 
-## DEGs only
+## DEGs only (`r length(unique(significantResults[[biomart_filter]]))` genes)
 
 ```{r 'sampleDist_degs', fig.width=10, fig.height=10}
 ## Limit to the top n genes
@@ -1137,23 +1201,28 @@ sampleDistsDEGs <- stats::dist(t(assay(rld_degs)))
 sampleDistMatrixDEGs <- as.matrix(sampleDistsDEGs)
 
 ## Add names based on intgroup
-rownames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, params$design]), 1,
+rownames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
     paste, collapse = ' : ')
-colnames(sampleDistMatrixDEGs) <- NULL
+colnames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+    paste, collapse = ' : ')
+
+distances_df <- as.data.frame(colData(rld)[,params$intgroup])
+# apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
 
 ## Define colors to use for the heatmap
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 
 ## Make the heatmap
 pheatmap(sampleDistMatrixDEGs,
-         clustering_distance_rows = sampleDistsDEGs,
-         clustering_distance_cols = sampleDistsDEGs,
-         color = colors)
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         color = colors,
+         annotation_col = distances_df)
 ```
 
 This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data of all DEGs. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
 
-## Most variable genes only
+## Most `r nBest` variable genes only
 
 ```{r 'sampleDist_top', fig.width=10, fig.height=10}
 ## Limit to the top n genes
@@ -1163,25 +1232,30 @@ sampleDistsTop <- stats::dist(t(assay(rld)[select,]))
 sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 
 ## Add names based on intgroup
-rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, params$design]), 1,
+rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
     paste, collapse = ' : ')
-colnames(sampleDistMatrixTop) <- NULL
+colnames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+    paste, collapse = ' : ')
+
+distances_df <- as.data.frame(colData(rld)[,params$intgroup])
+# apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
 
 ## Define colors to use for the heatmap
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 
 ## Make the heatmap
 pheatmap(sampleDistMatrixTop,
-         clustering_distance_rows = sampleDistsTop,
-         clustering_distance_cols = sampleDistsTop,
-         color = colors)
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         color = colors,
+         annotation_col = distances_df)
 ```
 
 This plot shows how samples are clustered based on their euclidean distance using the regularized log transformed count data of the top `r nBest` most variable genes. This figure gives an overview of how the samples are hierarchically clustered. It is a complementary figure to the PCA plot.
 
 # Heatmaps {.tabset .tabset-fade}
 
-## All DEGs
+## All `r length(unique(significantResults[[biomart_filter]]))` DEGs
 
 ```{r 'heatmap_all_DEGs', collapse=TRUE, fig.height=10}
 
@@ -1265,16 +1339,26 @@ This section contains three groups of MA plots (see [Wikipedia](https://en.wikip
 
 This group of plots shows `alpha` = `r metadata(resList[[1]])$alpha`, which is the `alpha` value used to determine which resulting features were significant when running the function `DESeq2::results()`.  
 
+```{r fc_range, warning=FALSE}
+# Find IQR for absolute values of all significant log2foldchanges
+# Plot MA plots
+foldchangestats <- boxplot(abs(significantResults$log2FoldChange))
+ylims_for_ma_plots <- c(-foldchangestats$stats[4,1],foldchangestats$stats[4,1])
+```
 
 ```{r 'MAplotalpha', results='asis'}
 ## MA plot with alpha used in DESeq2::results()
+
 for (i in seq_along(resList)) {
   contrast = gsub(pattern = paste0("log2.*", DESIGN, "\ "),
                   replacement =  "",
                   x = resList[[i]]@elementMetadata[[2]][2])
   cat("###", contrast, "  \n\n")
   MA_title <- paste0('MA plot, alpha = ', metadata(resList[[i]])$alpha,', ',contrast)
-  DESeq2::plotMA(resList[[i]], alpha = metadata(resList[[i]])$alpha, main = str_wrap(MA_title, width=40))
+  DESeq2::plotMA(resList[[i]],
+                 alpha = metadata(resList[[i]])$alpha,
+                 main = str_wrap(MA_title, width=40),
+                 ylim = ylims_for_ma_plots)
   cat('  \n\n')
 }
 
@@ -1328,6 +1412,7 @@ This plot shows a histogram of the unadjusted p-values. It might be skewed right
 ```{r pvalueSumm}
 ## P-value distribution summary
 summary(allResults$pvalue)
+#boxplot(allResults$pvalue)
 ```
 
 This is the numerical summary of the distribution of the p-values.
@@ -1349,11 +1434,10 @@ This table shows the number of features with p-values less or equal than some co
 ```{r padjHistogram, collapse=TRUE}
 ## Adjusted p-values histogram plot
 ggplot(allResults, aes(x = padj)) +
-    geom_histogram(alpha=.5, position='identity', bins = 50) +
-    labs(title=paste('Histogram of', elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)])) +
-    xlab('Adjusted p-values') +
-    xlim(c(0, 1.0005)) +
-  facet_wrap( ~ contrast, ncol = 2, scales="free")
+  geom_histogram(alpha=0.5, position='identity', bins = 50) +
+  labs(title=paste('Histogram of', elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)])) +
+  xlab('Adjusted p-values') +
+  facet_wrap( ~ contrast, ncol = 2)
 ```
 
 This plot shows a histogram of the `r elementMetadata(resList[[1]])$description[grep('adjusted', elementMetadata(resList[[1]])$description)]`. It might be skewed right or left, or flat as shown in the [Wikipedia examples](https://en.wikipedia.org/wiki/Histogram#Examples). 
@@ -1433,6 +1517,7 @@ DT::datatable(res.df.dt,
 This section contains plots showing the normalized counts per sample for each group of interest. Only the best `r nBestFeatures` features are shown, ranked by their absolute fold change values. The Y axis is on the log10 scale and the feature name is shown in the title of each plot.
 
 ```{r 'plotCounts'}
+# Would be valuable to have this broken down by contrast too.
 plotCounts_gg <- function(i, dds, intgroup) {
     plotdata <- plotCounts(dds,
                        gene=i,
@@ -1525,23 +1610,16 @@ ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
 if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
   doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
   # Create input file...
-  lognorm.read.counts <- as.data.frame(counts(dds, normalized=TRUE))
-  
-  # rld normalized, size factor normalized, rounded to 4 significant figures
+  read.counts <- as.data.frame(counts(dds, normalized=TRUE))
+  lognorm.read.counts <- log2(read.counts+1)
   bmdexpress <- fastbmd <- as.data.frame(lognorm.read.counts)
-  bmdexpress <- cbind(SampleID=row.names(bmdexpress), bmdexpress, stringsAsFactors=F)
-  bmdexpress <- rbind( Dose=c("#CLASS:DOSE", as.numeric(DESeqDesign[,doseCol])), bmdexpress, stringsAsFactors=F)
-  
-  # Create input for fastbmd also
-  fastbmd <- cbind(SampleID=row.names(fastbmd), fastbmd, stringsAsFactors=F)
-  # Optionally... you can add a second variable name (e.g., chemical) for fastbmd only
-  # fastbmd <- rbind( Chemical=c("#CLASS:CHEMICAL",as.character(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$chemical)),
-  #                  fastbmd,
-  #                  stringsAsFactors=F)
-  fastbmd <- rbind( Dose=c("#CLASS:DOSE",format(DESeqDesign[DESeqDesign$original_names %in% colnames(fastbmd),]$dose, scientific=F)),
-                    fastbmd,
-                    stringsAsFactors=F)
-  
+  bmdexpress <- cbind(SampleID=c(row.names(bmdexpress)),
+                      bmdexpress,
+                      stringsAsFactors=F)
+  bmdexpress <- rbind(c("Dose",as.numeric(DESeqDesign[colnames(bmdexpress)[-1],][,doseCol])),
+                      bmdexpress,
+                      stringsAsFactors=F)
+
   if(!is.na(params$group_facet)) {
     write.table(bmdexpress,
                 file=file.path(paths$DEG_output, paste0("bmdexpress_input_", params$group_filter, ".txt")),
@@ -1549,21 +1627,9 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
                 sep = "\t",
                 row.names = F,
                 col.names = T)
-    write.table(fastbmd,
-                file=file.path(paths$DEG_output, paste0("fastbmd_input_", params$group_filter, ".txt")),
-                quote = F,
-                sep = "\t",
-                row.names = F,
-                col.names = T)
   } else {
     write.table(bmdexpress,
                 file=file.path(paths$DEG_output, "bmdexpress_input.txt"),
-                quote = F,
-                sep = "\t",
-                row.names = F,
-                col.names = T)
-    write.table(fastbmd,
-                file=file.path(paths$DEG_output, "fastbmd_input.txt"),
                 quote = F,
                 sep = "\t",
                 row.names = F,
@@ -1657,12 +1723,7 @@ enrich_go_cc <- enrichGO(gene = myDEGs,
 
 ## Biological processes
 
-```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
-if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
-  plot1 <- clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
-    theme(axis.text.y = element_text(angle = 0)) +
-    scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
-  
+```{r calculate-foldchanges, message=FALSE, warning=FALSE}
   DEGs_full <- dplyr::left_join(significantResults,
                                 id_table_entrez,
                                 by=biomart_filter) %>%
@@ -1671,6 +1732,15 @@ if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   names(foldChanges) <- DEGs_full %>% dplyr::pull(entrezgene_id)
   foldChanges <- foldChanges %>% sort() %>% rev()
   foldChanges <- foldChanges[!is.na(names(foldChanges))]
+```
+
+```{r plot_GO_analysis_bp, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
+if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 3) {
+  plot1 <- clusterProfiler::dotplot(enrich_go_bp, font.size=9, showCategory=20)  +
+    theme(axis.text.y = element_text(angle = 0)) +
+    scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+  
+
   
   simplified_bp <- simplify(enrich_go_bp, cutoff = 0.7, by = "p.adjust", select_fun = min)
   # Max size of gene set... useful for visualizing networks
@@ -1708,7 +1778,7 @@ if (nrow(enrich_go_bp@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 ## Molecular Functions
 
 ```{r plot_GO_analysis_mf, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
-if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
+if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 3) {
   plot1 <- clusterProfiler::dotplot(enrich_go_mf, font.size=9)  +
      theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
@@ -1727,7 +1797,7 @@ if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   show5 <- simplified_mf_filt$Description[1:5] # Top 5
   show10 <- simplified_mf_filt$Description[1:10] # Top 10
   
-  if(nrow(simplified_mf) > 1) {
+  if(nrow(simplified_mf) > 3) {
   plot2 <- cnetplot(simplified_mf,
            foldChange=foldChanges,
            showCategory = show10,
@@ -1741,7 +1811,7 @@ if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
     scale_y_discrete(labels = function(x) stringr::str_trunc(x, width = 50))
   
   print(plot1)
-  if(nrow(simplified_mf) > 1) {print(plot2)} else {print("Network plot not shown due to a limited number of enriched terms.")}
+  if(nrow(simplified_mf) > 3) {print(plot2)} else {print("Network plot not shown due to a limited number of enriched terms.")}
   print(plot3)
   print(plot4)
 } else { print("No significantly enriched terms using criteria selected") }
@@ -1750,7 +1820,7 @@ if (nrow(enrich_go_mf@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 ## Cellular Component
 
 ```{r plot_GO_analysis_cc, message=FALSE, warning=FALSE, fig.width=12, collapse=TRUE}
-if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
+if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 3) {
   plot1 <- clusterProfiler::dotplot(enrich_go_cc, font.size=9)  +
      theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
@@ -1794,7 +1864,17 @@ if (nrow(enrich_go_cc@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
 
 Please use this as a starting point for the bioinformatics/statistics section of any publications based on the data analyzed in this report. All of the information provided here is contained elsewhere in the report, but it is aggregated here for your convenience.  
 
-There were `r samples_before` samples for which data was collected. A count matrix containing the $`r initialSampleDataCount`$ samples sequenced in this experiment was imported into R for statistical analysis. After removing samples with less than $`r threshold`$ reads, `r filteredSampleDataCount` samples were left. Following the exclusion of other samples *(which ones? Why? Please explain for your experiment, if applicable.)*, there were `r samples_after` samples remaining. Following the recommendations set out by the Omics Data Analysis Frameworks for Regulatory application (R-ODAF) guidelines, genes were filtered to include only those where 75% of at least one experimental group were above `r MinCount` CPM, and spurious spikes were removed in which (max - median) of counts were less than (sum of counts)/(number of replicates + 1). The samples excluded from analysis are shown in the table below. We used DESeq2 `r packageVersion("DESeq2")` to test for differentially abundant genes within the `r Platform` data. The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`. An alpha of `r resList[[1]]@metadata$alpha` was used to extract raw results, which are reported as the `r gsub(mcols(x=resList[[1]])$description[[4]],pattern=":.*",replacement="")`. To account for multiple testing, `r mcols(resList[[1]])$description[5]` are reported. Cook's cutoff was set to `r cooks` in this analysis. Differentially expressed genes (DEGs) were filtered using a linear fold change cutoff of `r linear_fc_filter` and adjusted p-value of `r alpha`.  
+There were `r samples_before` samples for which data was collected. A count matrix containing the $`r initialSampleDataCount`$ samples sequenced in this experiment was imported into R for statistical analysis. After removing samples with less than $`r threshold`$ reads, `r filteredSampleDataCount` samples were left. Following the exclusion of other samples *(which ones? Why? Please explain for your experiment, if applicable.)*, there were `r samples_after` samples remaining. Following the recommendations set out by the Omics Data Analysis Frameworks for Regulatory application (R-ODAF) guidelines, genes were filtered to include only those where 75% of at least one experimental group were above `r MinCount` CPM, and spurious spikes were removed in which (max - median) of counts were less than (sum of counts)/(number of replicates + 1). The samples excluded from analysis are shown in the table below. We used DESeq2 `r packageVersion("DESeq2")` [@ggplotcitation] to test for differentially abundant genes within the `r Platform` data. The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`. An alpha of `r resList[[1]]@metadata$alpha` was used to extract raw results, which are reported as the `r gsub(mcols(x=resList[[1]])$description[[4]],pattern=":.*",replacement="")`. To account for multiple testing, `r mcols(resList[[1]])$description[5]` are reported. Cook's cutoff was set to `r cooks` in this analysis. Differentially expressed genes (DEGs) were filtered using a linear fold change cutoff of `r linear_fc_filter` and adjusted p-value of `r alpha`.  
+
+## References {-}
+
+If these methods were used in your study, please cite the following papers as appropriate:  
+
+---
+nocite: '@*'
+---
+
+<div id="refs"></div>
 
 # Session Info
 
