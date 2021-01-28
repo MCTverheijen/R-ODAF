@@ -12,16 +12,21 @@ subtitle: "Bisphenols Study"
 author: "Matthew J. Meier"
 ---
 
-
 Modified from code provided by Andrew Williams (Health Canada) and recommendations from Joshua Harrill (US EPA).  
 
 This should be run prior to DEG/BMD analysis to remove any suspect samples from across the entire study.  
+
+The metadata you use should have the following columns with T or F listed for each sample:  
+- technical_control
+- reference_rna
+- solvent_control
 
 ```{r parameters}
 ############################################################################
 # Parameters (cutoffs)
 ############################################################################
 tree_height_cutoff=0.1 # For clustering
+dendo_color_by="chemical" # Specify how you would like to color the dendograms
 nmr_threshold=100000 # 10% of 1M reads for TempOSeq
 sampledata_sep="," # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
 ```
@@ -42,6 +47,8 @@ library(foreach)
 library(doParallel)
 library(UpSetR)
 library(kableExtra)
+library(dendextend)
+library(vtree) # Richard Webster and Nick Barrowman
 ```
 
 ```{r paths}
@@ -106,7 +113,7 @@ nrow(d)
 ############################################################################
 #Checking row and column orderings
 ############################################################################
-names(sampleData) == d$original_names
+all(names(sampleData) == d$original_names)
 ```
 
 # Sample Filtering Code
@@ -145,9 +152,11 @@ names(sampleData) == d$original_names
 # 
 ```
 
-## Dendogram (before filtering)
+## Dendogram and distance based filtering
 
 A tree height cutoff of `r tree_height_cutoff` is used to cut the tree and separate outliers.
+
+### Dendogram, all samples, prefiltering
 
 ```{r dendogram_clustering}
 ############################################################################
@@ -167,24 +176,44 @@ for(k in 1:length(libsize)){
 }
 
 ############################################################################
-# Dendrogram
+# Dendrogram: all
 ############################################################################
-CairoPDF(file = file.path(paths$processed, "dendrogram_before_filtering.pdf"),
+CairoPDF(file = file.path(paths$processed, "dendrogram_prefiltering_all.pdf"),
          width = 14,
          height = 8.5,
          family = "Courier")
 
-A <- 1-cor(as.matrix(cpm), method = "spearman")
-A <- hclust(as.dist(A), method="average")
+dendo_before_all_samples <- 1-cor(as.matrix(cpm), method = "spearman")
+dendo_before_all_samples <- hclust(as.dist(dendo_before_all_samples), method="average")
 
-dend1 <- as.dendrogram(A)
-par(cex=0.2, mar = c(15, 4, 4, 2))
+dendo_before_all_samples <- as.dendrogram(dendo_before_all_samples)
+colors_to_use <- as.numeric(as.factor(DESeqDesign[,"technical_control"]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_before_all_samples)]
+labels_colors(dendo_before_all_samples) <- ordered_colors
 
-plot(dend1, main="log2 CPM")
+original_names <- DESeqDesign[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_before_all_samples)]
+
+labels_to_use <- DESeqDesign[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_before_all_samples)]
+labels_to_use <- paste(labels_to_use, original_names)
+
+par(cex=0.15, mar = c(15, 4, 4, 2))
+plot(dendo_before_all_samples %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
 dev.off()
+```
 
-tree_groups <- cutree(A, h = tree_height_cutoff)
+### Filtering by Pearson correlation distance
+
+```{r filtering_dendogram}
+############################################################################
+# Filtering
+############################################################################
+
+tree_groups <- cutree(dendo_before_all_samples, h = tree_height_cutoff)
 n <- table(tree_groups)
 n <- n[n == 1]
 
@@ -195,6 +224,140 @@ if(length(n > 0)){
               sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
   d$group[flag_cluster]
 }
+```
+
+### Splitting metadata into groups: technical controls and experimental samples
+
+```{r split_metadata}
+############################################################################
+# Dendrogram: split into experimental samples vs technical controls
+############################################################################
+
+tech_ctrl_names <- DESeqDesign %>% 
+  dplyr::filter(technical_control==T) %>%
+  dplyr::pull(original_names)
+
+sample_names <- DESeqDesign %>% 
+  dplyr::filter(technical_control==F) %>%
+  dplyr::pull(original_names)
+
+```
+
+### Dendogram, technical controls, prefiltering
+
+```{r dendo_tech_before}
+############################################################################
+# Technical Controls, Prefiltering
+############################################################################
+CairoPDF(file = file.path(paths$processed,
+                          "dendrogram_prefiltering_tech_controls.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+dendo_before_tech_ctrls <- 1-cor(as.matrix(cpm %>% dplyr::select(all_of(tech_ctrl_names))),
+                                           method = "spearman")
+DESeqDesignTechCtrls <- DESeqDesign %>% dplyr::filter(original_names %in% all_of(tech_ctrl_names))
+
+dendo_before_tech_ctrls <- hclust(as.dist(dendo_before_tech_ctrls), method="average")
+
+dendo_before_tech_ctrls <- as.dendrogram(dendo_before_tech_ctrls)
+colors_to_use <- as.numeric(as.factor(DESeqDesignTechCtrls[,dendo_color_by]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_before_tech_ctrls)]
+labels_colors(dendo_before_tech_ctrls) <- ordered_colors
+
+original_names <- DESeqDesignTechCtrls[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_before_tech_ctrls)]
+
+labels_to_use <- DESeqDesignTechCtrls[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_before_tech_ctrls)]
+labels_to_use <- paste(labels_to_use, original_names)
+
+par(cex=0.4, mar = c(15, 4, 4, 2))
+plot(dendo_before_tech_ctrls %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+
+
+```
+
+### Dendogram, experimental samples, prefiltering
+
+```{r dendo_samples_before}
+############################################################################
+# Experimental Samples, Prefiltering
+############################################################################
+
+CairoPDF(file = file.path(paths$processed,
+                          "dendrogram_prefiltering_exp_samples.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+dendo_before_all_exp_samples <- 1-cor(as.matrix(cpm  %>% dplyr::select(all_of(sample_names))),
+                                  method = "spearman")
+
+DESeqDesignExpSamples <- DESeqDesign %>% dplyr::filter(original_names %in% all_of(sample_names))
+
+dendo_before_all_exp_samples <- hclust(as.dist(dendo_before_all_exp_samples), method="average")
+
+dendo_before_all_exp_samples <- as.dendrogram(dendo_before_all_exp_samples)
+colors_to_use <- as.numeric(as.factor(DESeqDesignExpSamples[,"dose"]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_before_all_exp_samples)]
+labels_colors(dendo_before_all_exp_samples) <- ordered_colors
+
+original_names <- DESeqDesignExpSamples[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_before_all_exp_samples)]
+
+labels_to_use <- DESeqDesignExpSamples[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_before_all_exp_samples)]
+labels_to_use <- paste(labels_to_use, original_names)
+
+par(cex=0.2, mar = c(15, 4, 4, 2))
+plot(dendo_before_all_exp_samples %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+
+############################################################################
+# Experimental Samples, Prefiltering, Colored by Dose
+############################################################################
+
+CairoPDF(file = file.path(paths$processed,
+                          "dendrogram_prefiltering_exp_samples_by_dose.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+dendo_before_all_exp_samples <- 1-cor(as.matrix(cpm  %>% dplyr::select(all_of(sample_names))),
+                                  method = "spearman")
+
+DESeqDesignExpSamples <- DESeqDesign %>% dplyr::filter(original_names %in% all_of(sample_names))
+
+dendo_before_all_exp_samples <- hclust(as.dist(dendo_before_all_exp_samples), method="average")
+
+dendo_before_all_exp_samples <- as.dendrogram(dendo_before_all_exp_samples)
+colors_to_use <- as.numeric(as.factor(DESeqDesignExpSamples[,dendo_color_by]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_before_all_exp_samples)]
+labels_colors(dendo_before_all_exp_samples) <- ordered_colors
+
+original_names <- DESeqDesignExpSamples[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_before_all_exp_samples)]
+
+labels_to_use <- DESeqDesignExpSamples[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_before_all_exp_samples)]
+labels_to_use <- paste(labels_to_use, original_names)
+
+par(cex=0.2, mar = c(15, 4, 4, 2))
+plot(dendo_before_all_exp_samples %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+
 ```
 
 ## Additional QC metrics
@@ -232,8 +395,8 @@ The number of probes having >5 uniquely mapped reads are calculated. Outliers on
 # Ncov5 The number of probes with at least 5 uniquely mapped reads.
 ######################################################################################
 # Tukey's Outer Fence cutoff - 3*IQR
-n_samples <- nrow(sampleData)
-QAQC$Ncov5 <- apply(sampleData, 2, function(x) length(x[x > 4]))/n_samples
+n_genes <- nrow(sampleData)
+QAQC$Ncov5 <- apply(sampleData, 2, function(x) length(x[x > 4]))/n_genes
 percent_active_probes <- boxplot(QAQC$Ncov5, range=3)
 failed_Ncov5 <- QAQC[QAQC$Ncov5 < percent_active_probes$stats[1,1],]
 
@@ -253,15 +416,45 @@ The number of probes capturing 80% of the signal is first calculated, and sample
 ######################################################################################
 # Tukey's Outer Fence cutoff - 3*IQR
 # (include test samples, vehicle controls, and reference chemical treatments)
-ref <- apply(sampleData/QAQC$NMR, 2, median)
-sig80 <- quantile(ref, prob = 0.8)
 
-QAQC$Nsig80 <- 0
-
-for(k in 1:nrow(QAQC)){
-  flag80pct <- sampleData[,k] > sig80 * QAQC$NMR[k]
-  QAQC$Nsig80[k] <- length(sampleData[flag80pct, 1])/n_samples
+### Using some of the EPA code for now:
+countStats <- function(
+  counts, 
+  nsig=getOption("httrStatNsig", default=0.8)
+) {
+  # Load required pkgs
+	require(foreach)
+  # Store results in a vector
+	st <- vector()
+	# Drop probes w/ no reads (this is for efficiency, should not impact final Nsig values)
+	counts_nz <- counts[counts > 0]
+	# Sort in decreasing order
+	counts_nz <- sort(counts_nz, decreasing = T)
+	# Compute cumulative sum of counts starting from highest count probe
+	cumCounts <- cumsum(counts_nz)
+	# Convert cumulative sums to cumulative proportions
+	cumProp <- cumCounts / sum(counts_nz)
+	# Compute the minimum number of probes to capture X% of total reads
+	if(length(nsig) > 0) {
+		ns <- foreach(prop=nsig, .combine='c') %do% {min(which(cumProp > prop))}
+		names(ns) <- paste0("n_sig",nsig*100)
+		st <- append(st, ns)
+	}
+	return(st)
 }
+
+# ref <- apply(sampleData/QAQC$NMR, 2, median)
+# sig80 <- quantile(ref, prob = 0.8)
+# 
+# QAQC$Nsig80 <- 0
+# 
+# for(k in 1:nrow(QAQC)){
+#   flag80pct <- sampleData[,k] > sig80 * QAQC$NMR[k]
+#   QAQC$Nsig80[k] <- length(sampleData[flag80pct, 1])/n_samples
+# }
+# 
+
+QAQC$Nsig80 <- apply(sampleData, 2, countStats)
 
 probes_capturing_top_80 <- boxplot(QAQC$Nsig80, range=3)
 failed_Nsig80 <- QAQC[QAQC$Nsig80 < probes_capturing_top_80$stats[1,1],]
@@ -292,15 +485,15 @@ d %>%
   dplyr::pull(group)
 ```
 
-# Write QC data to disk
+# Compose tables
 
 ```{r return_data}
 
 ######################################################################################
 # Add Dendogram Clustering Pass/Fail to QAQC
 ######################################################################################
-QAQC$Denodogram <- "PASS"
-QAQC$Denodogram[which(QAQC$Sample %in% d$original_names[flag_cluster])] <- "FAIL"
+QAQC$Dendogram <- "PASS"
+QAQC$Dendogram[which(QAQC$Sample %in% d$original_names[flag_cluster])] <- "FAIL"
 
 failed_dendo_clustering <- QAQC[QAQC$Denodogram == "FAIL",]
 
@@ -343,20 +536,41 @@ QAQC_failed_logical <- QAQC_failed_logical %>%
 This section shows several tables of the outlier data.  
 
 
-## UpSet Plot of Outliers
+## UpSet plot and vtree plot of outliers
 
-This plot shows the various QC metrics that may result in sample removal, along with the numbers of samples that were removed for one or more of those filters.
+This plot shows the various QC metrics that may result in sample removal, along with the numbers of samples that were removed for one or more of those filters.  
+
 
 ```{r upset}
 
 upset(QAQC_failed_logical)
+
+QAQC_annotated <- dplyr::left_join(DESeqDesign,
+                                   QAQC_pass_fail,
+                                   by=c("original_names"="Sample")) %>%
+  dplyr::right_join(QAQC, by=c("name"="Sample"),
+                   suffix = c("", "_data"))
+
+QAQC_annotated$Any <- apply(QAQC_annotated,
+                            MARGIN=1,
+                            FUN = function(x) ifelse(any(x == "FAIL"),"FAIL","PASS"))
+
+vtree(QAQC_annotated,
+      "Dendogram NMR Ncov5 Nsig80 Gini Any",
+      summary="NMR_data \nAverage Reads Mapped\n%mean% %leafonly% ")
+
+vtree(QAQC_annotated,
+      "Dendogram NMR Ncov5 Nsig80 Gini",
+      summary="NMR_data \nAverage Reads Mapped\n%mean% %leafonly% ",
+      pattern=T)
 
 outliers <- QAQC_failed$Sample
 outliers
 
 flag_outliers <- d$original_names %in% outliers
 outlier_metadata <- d[flag_outliers,]
-metadata_outliers_removed <- DESeqDesign[!flag_outliers,]
+metadata_outliers_removed <- DESeqDesign[!flag_outliers,] %>%
+  filter(technical_control==F)
 
 ```
 
@@ -381,11 +595,44 @@ QAQC_failed_kable <- outlier_metadata %>%
 ```{r table_pass_fail}
 
 knitr::kable(QAQC_failed_kable,
-             caption="Reasons for sample removal") %>%
+             caption="Which samples were removed and why?") %>%
   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
   scroll_box(width = "100%", height = "480px")
 
-write.table(outlier_metadata,
+
+```
+
+
+## Overall summary of pass/fail for each test
+
+```{r pass_fail_summary}
+QAQC_annotated %>%
+  dplyr::group_by(Dendogram, NMR, Ncov5, Nsig80, Gini, Any) %>%
+  tally() %>%
+  knitr::kable(caption="Summary of pass/fail results")%>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  scroll_box(width = "100%", height = "480px")
+```
+
+## Pass/fail for each test, broken up by sample groups
+
+```{r pass_fail_by_group}
+QAQC_annotated %>%
+  dplyr::group_by(Dendogram, NMR, Ncov5, Nsig80, Gini, Any, group) %>%
+  tally() %>%
+  knitr::kable(caption="Pass/fail results by group")%>%
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%
+  scroll_box(width = "100%", height = "480px")
+```
+
+## Write tables to disk
+
+```{r write_output}
+
+outlier_metadata_annotated <- dplyr::left_join(outlier_metadata,
+                                               QAQC_pass_fail,
+                                               by=c("original_names"="Sample"))
+write.table(outlier_metadata_annotated,
             file.path(paths$processed, "samples_removed.txt"),
             sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
 
@@ -396,28 +643,167 @@ write.table(metadata_outliers_removed,
 d_filtered <- d[!(flag_outliers),]
 sampleData_filtered <- sampleData %>% dplyr::select(-all_of(outliers))
 ncol(sampleData_filtered)
-
 ```
 
 ## Dendogram (after filtering)
 
-```{r dendogram_after}
+### Dendogram, all samples, postfiltering
+
+```{r dendogram_all_after}
 ############################################################################
-# Dendogram After Removing Outliers
+# Dendrogram: all, after filtering
 ############################################################################
-cpm_outliers_removed <- cpm %>% dplyr::select(-all_of(outliers))
-CairoPDF(file = file.path(paths$processed, "dendrogram_after_filtering.pdf"),
+
+CairoPDF(file = file.path(paths$processed, "dendrogram_postfiltering_all.pdf"),
          width = 14,
          height = 8.5,
          family = "Courier")
 
-B <- 1-cor(as.matrix(cpm_outliers_removed), method = "spearman")
-B <- hclust(as.dist(B), method="average")
+dendo_after_all_samples <- 1-cor(as.matrix(cpm %>% dplyr::select(-all_of(outliers))),
+                                  method = "spearman")
+dendo_after_all_samples <- hclust(as.dist(dendo_after_all_samples), method="average")
 
-dend_after <- as.dendrogram(B)
+dendo_after_all_samples <- as.dendrogram(dendo_after_all_samples)
+colors_to_use <- as.numeric(as.factor(DESeqDesign[,"technical_control"]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_after_all_samples)]
+labels_colors(dendo_after_all_samples) <- ordered_colors
+
+original_names <- DESeqDesign[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_after_all_samples)]
+
+labels_to_use <- DESeqDesign[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_after_all_samples)]
+labels_to_use <- paste(labels_to_use, original_names)
+
+par(cex=0.15, mar = c(15, 4, 4, 2))
+plot(dendo_after_all_samples %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+```
+
+### Dendogram, technical control samples, postfiltering
+
+```{r dendogram_technical_after}
+############################################################################
+# Technical Controls, Postfiltering
+############################################################################
+CairoPDF(file = file.path(paths$processed,
+                          "dendrogram_postfiltering_tech_controls.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+dendo_after_tech_ctrls <- 1-cor(as.matrix(cpm %>%
+                                            dplyr::select(all_of(tech_ctrl_names)) %>%
+                                            dplyr::select(-all_of(outliers[outliers %in% tech_ctrl_names]))),
+                                method = "spearman")
+
+DESeqDesignTechCtrls <- DESeqDesign %>% dplyr::filter(original_names %in% all_of(tech_ctrl_names))
+
+dendo_after_tech_ctrls <- hclust(as.dist(dendo_after_tech_ctrls), method="average")
+
+dendo_after_tech_ctrls <- as.dendrogram(dendo_after_tech_ctrls)
+colors_to_use <- as.numeric(as.factor(DESeqDesignTechCtrls[,dendo_color_by]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_after_tech_ctrls)]
+labels_colors(dendo_after_tech_ctrls) <- ordered_colors
+
+original_names <- DESeqDesignTechCtrls[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_after_tech_ctrls)]
+
+labels_to_use <- DESeqDesignTechCtrls[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_after_tech_ctrls)]
+labels_to_use <- paste(labels_to_use, original_names)
+
+par(cex=0.4, mar = c(15, 4, 4, 2))
+plot(dendo_after_tech_ctrls %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+```
+
+### Dendogram, experimental samples, postfiltering
+
+```{r dendogram_exp_after}
+############################################################################
+# Experimental Samples, Postfiltering
+############################################################################
+
+CairoPDF(file = file.path(paths$processed,
+                          "dendrogram_prefiltering_exp_samples.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+dendo_after_all_exp_samples <- 1-cor(as.matrix(cpm %>%
+                                            dplyr::select(all_of(sample_names)) %>%
+                                            dplyr::select(-all_of(outliers[outliers %in% sample_names]))),
+                                  method = "spearman")
+
+DESeqDesignExpSamples <- DESeqDesign %>% dplyr::filter(original_names %in% all_of(sample_names))
+
+dendo_after_all_exp_samples <- hclust(as.dist(dendo_after_all_exp_samples), method="average")
+
+dendo_after_all_exp_samples <- as.dendrogram(dendo_after_all_exp_samples)
+colors_to_use <- as.numeric(as.factor(DESeqDesignExpSamples[,"dose"]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_after_all_exp_samples)]
+labels_colors(dendo_after_all_exp_samples) <- ordered_colors
+
+original_names <- DESeqDesignExpSamples[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_after_all_exp_samples)]
+
+labels_to_use <- DESeqDesignExpSamples[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_after_all_exp_samples)]
+labels_to_use <- paste(labels_to_use, original_names)
+
 par(cex=0.2, mar = c(15, 4, 4, 2))
+plot(dendo_after_all_exp_samples %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
+abline(h=tree_height_cutoff, col = "red", lwd = 2)
+dev.off()
+```
 
-plot(dend_after, main="log2 CPM")
+### Dendogram, experimental samples, postfiltering, colored by dose
+
+```{r dendogram_exp_post_dose}
+############################################################################
+# Experimental Samples, Postfiltering, Colored by Dose
+############################################################################
+
+CairoPDF(file = file.path(paths$processed,
+                          "dendrogram_prefiltering_exp_samples_by_dose.pdf"),
+         width = 14,
+         height = 8.5,
+         family = "Courier")
+
+dendo_after_all_exp_samples <- 1-cor(as.matrix(cpm %>%
+                                                 dplyr::select(all_of(sample_names)) %>%
+                                                 dplyr::select(-all_of(outliers[outliers %in% sample_names]))),
+                                     method = "spearman")
+
+DESeqDesignExpSamples <- DESeqDesign %>% dplyr::filter(original_names %in% all_of(sample_names))
+
+dendo_after_all_exp_samples <- hclust(as.dist(dendo_after_all_exp_samples), method="average")
+
+dendo_after_all_exp_samples <- as.dendrogram(dendo_after_all_exp_samples)
+colors_to_use <- as.numeric(as.factor(DESeqDesignExpSamples[,dendo_color_by]))
+ordered_colors <- colors_to_use[order.dendrogram(dendo_after_all_exp_samples)]
+labels_colors(dendo_after_all_exp_samples) <- ordered_colors
+
+original_names <- DESeqDesignExpSamples[,"original_names"]
+original_names <- original_names[order.dendrogram(dendo_after_all_exp_samples)]
+
+labels_to_use <- DESeqDesignExpSamples[,dendo_color_by]
+labels_to_use <- labels_to_use[order.dendrogram(dendo_after_all_exp_samples)]
+labels_to_use <- paste(labels_to_use, original_names)
+
+par(cex=0.2, mar = c(15, 4, 4, 2))
+plot(dendo_after_all_exp_samples %>% set("labels", labels_to_use),
+     main = "log2 CPM",
+     horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
 dev.off()
 ```

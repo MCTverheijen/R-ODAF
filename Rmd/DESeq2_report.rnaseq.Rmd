@@ -7,12 +7,12 @@ params:
   intgroup: ["group","dose"]           # experimental group of interest plus covariates; can be more than one
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: "chemical"          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: "BPC (Bisphenol C)"           # Which group will this report be done on?
+  group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: !r NA          # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
-  include_only_group: !r NA # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
+  include_only_group: 1 # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
   run_pathway_analysis: TRUE # Optionally disable pathway analysis if not available for your organism
@@ -194,10 +194,8 @@ The code above (not shown by default) loads the relevant R packages required for
 # PARAMETERS TO SET MANUALLY                            		 
 #
 # Set file locations
-if(!dir.exists(paths$DEG_output)){
-  dir.create(paths$DEG_output, recursive = TRUE)
-  dir.create(paths$RData, recursive = TRUE)
-  }
+if(!dir.exists(paths$DEG_output)){dir.create(paths$DEG_output, recursive = TRUE)}
+if(!dir.exists(paths$RData)){dir.create(paths$RData, recursive = TRUE)}
 
 # FILES TO LOAD
 # A. Tab delimited file with merged RSEM.genes.results files:
@@ -379,7 +377,7 @@ filteredSampleDataCount <- ncol(sampleData)
 # Sometimes extra cleanup may be needed
 # colnames(sampleData) <- gsub(pattern="^0", replacement="", x=colnames(sampleData))
 
-samples_before <- nrow(DESeqDesign)
+samples_before <- nrow(DESeqDesignAsRead)
 
 # Sanity check: each sample (row) in the metadata should have a corresponding column in the count data
 metadata_in_sampledata <- all(rownames(DESeqDesign) %in% colnames(sampleData))
@@ -1616,13 +1614,14 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
   bmdexpress <- cbind(SampleID=c(row.names(bmdexpress)),
                       bmdexpress,
                       stringsAsFactors=F)
-  bmdexpress <- rbind(c("Dose",as.numeric(DESeqDesign[colnames(bmdexpress)[-1],][,doseCol])),
+  bmdexpress <- rbind(c("Dose",as.character(DESeqDesign[colnames(bmdexpress)[-1],][,doseCol])),
                       bmdexpress,
                       stringsAsFactors=F)
 
   if(!is.na(params$group_facet)) {
     write.table(bmdexpress,
-                file=file.path(paths$DEG_output, paste0("bmdexpress_input_", params$group_filter, ".txt")),
+                file=file.path(paths$DEG_output,
+                               paste0("bmdexpress_input_", params$group_filter, ".txt")),
                 quote = F,
                 sep = "\t",
                 row.names = F,
