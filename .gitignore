@@ -55,6 +55,11 @@ vignettes/*.pdf
 paths.txt
 *metadata.txt
 *contrasts.txt
+<<<<<<< HEAD
 /metadata/metadata.txt
 /metadata/contrasts.txt
 /data/processed/genes.data.tsv
+=======
+./metadata*
+./data*
+>>>>>>> f1c14394222e231ab222160b2fd2017bd2c7a27c
