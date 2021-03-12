@@ -53,3 +53,5 @@ vignettes/*.pdf
 /DEG_output*
 /reports
 paths.txt
+*metadata.txt
+*contrasts.txt
