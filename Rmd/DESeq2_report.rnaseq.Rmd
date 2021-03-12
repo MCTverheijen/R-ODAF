@@ -67,8 +67,10 @@ paths$metadata <- paste0(paths$root, "/metadata")
 paths$reports <- paste0(paths$root, "/reports")
 if(is.na(params$group_facet)) {
   paths$DEG_output <- paste0(paths$root, "/DEG_output")
+  paths$pathway_analysis <- paste0(paths$DEG_output, "/pathway_analysis")
 } else {
   paths$DEG_output <- paste0(paths$root, "/DEG_output/group_", params$group_filter)
+  paths$pathway_analysis <- paste0(paths$DEG_output, "/pathway_analysis")
 }
 paths$RData <- paste0(paths$DEG_output, "/RData")
 
@@ -116,6 +118,7 @@ library('RColorBrewer')
 library('viridis')
 library('sessioninfo')
 library('plotly')
+library('dendextend')
 #library('RMariaDB')
 
 # Bioinformatics-specific
@@ -195,6 +198,7 @@ The code above (not shown by default) loads the relevant R packages required for
 #
 # Set file locations
 if(!dir.exists(paths$DEG_output)){dir.create(paths$DEG_output, recursive = TRUE)}
+if(!dir.exists(paths$pathway_analysis)){dir.create(paths$pathway_analysis, recursive = TRUE)}
 if(!dir.exists(paths$RData)){dir.create(paths$RData, recursive = TRUE)}
 
 # FILES TO LOAD
@@ -210,7 +214,6 @@ ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
 
 # Specify which groups need to be compared 
 contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="\t", header=FALSE,  quote="\"")
-short_contrast_names <- paste(contrasts$V1,"v.",contrasts$V2) # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
 DESIGN <- params$design	# Column name which defines the groups to be compared
 intgroup <- params$intgroup # "Interesting groups" - an experimental group and/or covariates
 
@@ -294,6 +297,9 @@ if(!is.na(params$include_only_column) & !is.na(params$include_only_group)) {
 #  doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
 #  contrasts <- contrasts # figure out how you want to reorder
 #}
+
+# Once contrasts have been filtered, generate short contrast names for report.
+short_contrast_names <- paste(contrasts$V1,"v.",contrasts$V2) # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
 
 # Create directories
 plotdir <- paste(paths$DEG_output, "/plots/", sep="")
@@ -554,7 +560,7 @@ knitr::kable(DESeqDesignAsRead %>% group_by(!!sym(params$design)) %>% tally(),
 
 This section shows the number of reads obtained for sample groups included in the report.  
 
-```{r read-counts, out.width = "50%", warning = FALSE}
+```{r read-counts, warning = FALSE}
 
 smpInfo = DESeqDesign
 temp4plot = data.frame(reads=round(colSums(sampleData),3))
@@ -739,7 +745,7 @@ The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`.
 #listEnsembl()
 #listMarts()
 #listDatasets(useMart('ensembl'))
-ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "useast.ensembl.org")
+ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "uswest.ensembl.org")
 #listAttributes(ensembl)
 #listFilters(ensembl)
 
@@ -762,8 +768,6 @@ if (file.exists(file.path(paths$RData,"id_table.Rdata"))) {
   save(id_table_entrez, file=file.path(paths$RData,"id_table.Rdata"))
   id_table <- id_table_entrez[,1:3]
 }
-
-# genes_entrezid <- dplyr::left_join(data.frame(genes), id_table_entrez, by=c("genes" = biomart_filter)) # Can I remove this? I think so
 
 sigtabList <- list()
 alltablList <- list()
@@ -1074,18 +1078,18 @@ The code above (not shown by default) writes Excel workbooks and text files of D
 These files should be provided to you as a separate zip file.
 
 ```{r 'embed_excel_files', eval=embedFiles}
-setwd(paths$DEG_output)
-xfun::embed_files(list.files(".", "[.](xlsx)$"), name = "RNASeq_Spreadsheets.zip")
+# setwd(paths$DEG_output)
+# xfun::embed_files(list.files(".", "[.](xlsx)$"), name = "RNASeq_Spreadsheets.zip")
 ```
 
 ```{r 'embed_text_files', eval=embedFiles}
-setwd(paths$DEG_output)
-xfun::embed_files(list.files(".", "[.](txt)$"), name = "RNASeq_Text_Files.zip")
+# setwd(paths$DEG_output)
+# xfun::embed_files(list.files(".", "[.](txt)$"), name = "RNASeq_Text_Files.zip")
 ```
 
 ```{r 'embed_ODAF_files', eval=embedFiles}
-setwd(paths$DEG_output)
-xfun::embed_dir(ODAFdir, name = "RNASeq_R-ODAF_text_files.zip")
+# setwd(paths$DEG_output)
+# xfun::embed_dir(ODAFdir, name = "RNASeq_R-ODAF_text_files.zip")
 ```
 
 ```{r 'save_point', show=FALSE, eval=flag}
@@ -1162,12 +1166,14 @@ This plot shows the principal components analysis limited to all DEGs. In this c
 ```{r 'sampleDist', fig.width=10, fig.height=10}
 ## Obtain the sample euclidean distances
 sampleDists <- stats::dist(t(assay(rld)))
+sampleDists <- dendextend::sort_dist_mat(sampleDists)
 sampleDistMatrix <- as.matrix(sampleDists)
+
 ## Add names based on intgroup
-rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
-    paste, collapse = ' : ')
-colnames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
-    paste, collapse = ' : ')
+# rownames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+#      paste, collapse = ' : ')
+# colnames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+#      paste, collapse = ' : ')
 
 distances_df <- as.data.frame(colData(rld)[,params$intgroup])
 # apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
@@ -1195,14 +1201,15 @@ This plot shows how samples are clustered based on their euclidean distance usin
 ## Obtain the sample euclidean distances
 # sampleDistsTop <- dist(t(assay(rld)[select,]))
 sampleDistsDEGs <- stats::dist(t(assay(rld_degs)))
+sampleDistsDEGs <- dendextend::sort_dist_mat(sampleDistsDEGs)
 # sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 sampleDistMatrixDEGs <- as.matrix(sampleDistsDEGs)
 
 ## Add names based on intgroup
-rownames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
-    paste, collapse = ' : ')
-colnames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
-    paste, collapse = ' : ')
+# rownames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+#     paste, collapse = ' : ')
+# colnames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+#     paste, collapse = ' : ')
 
 distances_df <- as.data.frame(colData(rld)[,params$intgroup])
 # apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
@@ -1227,13 +1234,14 @@ This plot shows how samples are clustered based on their euclidean distance usin
 ## Using the select object from PCA code above...
 ## Obtain the sample euclidean distances
 sampleDistsTop <- stats::dist(t(assay(rld)[select,]))
+sampleDistsTop <- dendextend::sort_dist_mat(sampleDistsTop)
 sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 
 ## Add names based on intgroup
-rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
-    paste, collapse = ' : ')
-colnames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
-    paste, collapse = ' : ')
+# rownames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+#     paste, collapse = ' : ')
+# colnames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
+#     paste, collapse = ' : ')
 
 distances_df <- as.data.frame(colData(rld)[,params$intgroup])
 # apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
@@ -1280,8 +1288,9 @@ mat_top <- mat_top - rowMeans(mat_top)
 genes_for_heatmap <- row.names(mat_top)
 genes_for_heatmap <- data.frame(genes=row.names(mat_top))
 names(genes_for_heatmap)[names(genes_for_heatmap) == "genes"] <- biomart_filter
-genes_for_heatmap <- dplyr::left_join(genes_for_heatmap, id_table_entrez,
-                                     by=biomart_filter) %>%
+genes_for_heatmap <- dplyr::left_join(genes_for_heatmap,
+                                      id_table_entrez,
+                                      by=biomart_filter) %>%
   dplyr::distinct()
   
 genes_for_heatmap[["external_gene_name"]] <- ifelse(is.na(genes_for_heatmap[["external_gene_name"]]),
@@ -1292,9 +1301,11 @@ genes_for_heatmap[["external_gene_name"]] <- ifelse(genes_for_heatmap[["external
                genes_for_heatmap[["ensembl_gene_id"]],
                genes_for_heatmap[["external_gene_name"]])
 
+genes_for_heatmap <- genes_for_heatmap %>% pull(external_gene_name) %>% unique()
+
 pheatmap(mat_top,
          annotation_col=heatmap_df,
-         labels_row=genes_for_heatmap[["external_gene_name"]],
+         labels_row=genes_for_heatmap,
          show_rownames = TRUE,
          border_color = NA,
          scale="row")
@@ -1317,10 +1328,12 @@ genes_for_heatmap <- dplyr::left_join(genes_for_heatmap, id_table_entrez,
                                       by=biomart_filter) %>%
   dplyr::distinct()
 
+genes_for_heatmap <- genes_for_heatmap %>% pull(external_gene_name) %>% unique()
+
 pheatmap(matRV,
          #color = rev(brewer.pal(11,"RdBu")), # inferno(10),
          annotation_col=heatmap_df,
-         labels_row=genes_for_heatmap[["external_gene_name"]],
+         labels_row=genes_for_heatmap,
          border_color = NA,
          scale = "row",
          cutree_rows = 3,
@@ -1340,7 +1353,7 @@ This group of plots shows `alpha` = `r metadata(resList[[1]])$alpha`, which is t
 ```{r fc_range, warning=FALSE}
 # Find IQR for absolute values of all significant log2foldchanges
 # Plot MA plots
-foldchangestats <- boxplot(abs(significantResults$log2FoldChange))
+foldchangestats <- boxplot(abs(significantResults$log2FoldChange), plot=F)
 ylims_for_ma_plots <- c(-foldchangestats$stats[4,1],foldchangestats$stats[4,1])
 ```
 
@@ -1519,7 +1532,7 @@ This section contains plots showing the normalized counts per sample for each gr
 plotCounts_gg <- function(i, dds, intgroup) {
     plotdata <- plotCounts(dds,
                        gene=i,
-                       intgroup=params$intgroup,
+                       intgroup=intgroup,
                        returnData = TRUE)
     plot_title <- paste(id_table$external_gene_name[id_table[[biomart_filter]] == i],
                         id_table$ensembl_gene_id[id_table[[biomart_filter]] == i])
@@ -1539,7 +1552,7 @@ plotCounts_gg <- function(i, dds, intgroup) {
 genesToPlot <- significantResults %>% arrange(-abs(log2FoldChange))
 
 for(i in head(unique(genesToPlot[[biomart_filter]]), nBestFeatures)) {
-  print(plotCounts_gg(i, dds = dds, intgroup = params$intgroup))
+  print(plotCounts_gg(i, dds = dds, intgroup = params$design))
 }
 
 ```
@@ -1717,6 +1730,13 @@ enrich_go_cc <- enrichGO(gene = myDEGs,
                          pAdjustMethod = "BH",
                          pvalueCutoff = 0.01,
                          qvalueCutoff = 0.05)
+
+write.table(as.data.frame(enrich_go_bp),
+            file = file.path(paths$pathway_analysis,"Enriched.GO_terms.Biological_Processes.txt"))
+write.table(as.data.frame(enrich_go_mf),
+            file = file.path(paths$pathway_analysis,"Enriched.GO_terms.Molecular_Functions.txt"))
+write.table(as.data.frame(enrich_go_cc),
+            file = file.path(paths$pathway_analysis,"Enriched.GO_terms.Cellular_Component.txt"))
 
 ```
 

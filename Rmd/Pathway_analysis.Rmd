@@ -32,6 +32,9 @@ if (nrow(DEG_pathways@result %>% filter(p.adjust < 0.01 & qvalue < 0.05)) > 0) {
   clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
     theme(axis.text.y = element_text(angle = 0)) +
     scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+  
+  write.table(as.data.frame(DEG_pathways),
+              file = file.path(paths$pathway_analysis, "Enriched.WikiPathways.txt"))
 } else { print("No significantly enriched terms using criteria selected") }
 ```
 
@@ -61,6 +64,12 @@ for (i in seq_along(levels(significantResults$contrast))) {
     plotList[[i]] <- clusterProfiler::dotplot(DEG_pathways, showCategory = 20, font.size=9)  +
       theme(axis.text.y = element_text(angle = 0)) +
       scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 30))
+    write.table(as.data.frame(DEG_pathways),
+                file = file.path(paths$pathway_analysis,paste0("Enriched.WikiPathways.",
+                                                         str_replace_all(levels(significantResults$contrast)[i],
+                                                                         " ",
+                                                                         "_"),
+                                                         ".txt")))
   } else { plotList[[i]] <- NA }
 }
 ```
@@ -98,6 +107,12 @@ for (i in seq_along(levels(significantResults$contrast))) {
   }
   kk <- gseKEGG(foldChanges, keyType="ncbi-geneid", organism=kegg_organism)
   gsea_sorted <- kk %>% filter(p.adjust < 0.05) %>% arrange(desc(enrichmentScore))
+  write.table(as.data.frame(gsea_sorted),
+              file = file.path(paths$pathway_analysis,paste0("Enriched.KEGG_Pathways.",
+                                                       str_replace_all(levels(significantResults$contrast)[i],
+                                                                       " ",
+                                                                       "_"),
+                                                       ".txt")))
   if(dim(kk@result)[1] > 0){
     plotListGSEA[[i]] <- ridgeplot(kk)
     plotListGSEA_escore[[i]] <- enrichplot::gseaplot2(gsea_sorted, geneSetID = c(seq_along(gsea_sorted$ID)))
