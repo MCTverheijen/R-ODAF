@@ -7,15 +7,17 @@
 ####################################################
 source ~/miniconda3/etc/profile.d/conda.sh
 project=$1 # Call script using project name as the only argument
-#specify the directory for the output
+# Specify the directory for the output
 OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
-#specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
+# Specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
 RAW_SAMPLE_DIR="${HOME}/shared/projects/${project}/data/raw/"
-# specify extention of input files (".fastq" or ".fastq.gz") 
-SUFFIX_INPUTFILES='.fastq.gz' 
-#specify the sequencing mode used to obtain the data
+# Specify extention of input files (".fastq" or ".fastq.gz") 
+SUFFIX_INPUTFILES='.fastq.gz'
+# Specify the sequencing type (RNASeq or TempOSeq)
+SEQTYPE='TempOSeq'
+# Specify the sequencing mode used to obtain the data
 SEQMODE="paired" #specify "paired" or "single" end mode
-# specify the read suffix (e.g. "_R1_001")
+# Specify the read suffix (e.g. "_R1_001")
 PAIRED_END_SUFFIX_FORWARD="_R1_001"
 # *IF* paired end mode was used, specify the reverse suffix as well (e.g. "_R2")
 PAIRED_END_SUFFIX_REVERSE="_R2_001"
@@ -39,9 +41,9 @@ RSEM_INDEX_ALREADY_AVAILABLE="Yes" #Specify "Yes" or "No"
 LARGE_GENOME="Yes"
 
 # System parameters
-#Specify amount of CPUs to use for alignment step (use 20 or 30)
+# Specify amount of CPUs to use for alignment step (use 20 or 30)
 CPU_FOR_ALIGNMENT=35 
-#Specify amount of CPUs to use (use 6 or higher)
+# Specify amount of CPUs to use (use 6 or higher)
 CPU_FOR_OTHER=35
 
 ### No other input required ###
@@ -93,6 +95,7 @@ declare QC_DIR_multiQC="${OUTPUTDIR}/MultiQC/"
 declare align_DIR="${OUTPUTDIR}/STAR/"
 declare Quant_DIR="${OUTPUTDIR}/RSEM/"
 declare RSEM_GENOMEDIR="${GENOMEDIR}/RSEM/"
+declare TEMPOSEQR="${HOME}/shared/projects/${project}/scripts/pete.star.script_v3.1.R"
 
 declare SUFFIX1=${SUFFIX_IN}
 declare SUFFIX_out="_trimmed${SUFFIX_IN}"
@@ -121,7 +124,7 @@ conda activate odaf
 ### Trimming raw reads : Fastp ###
 ##################################
 
-# trimming single end reads 
+# Trimming single end reads 
 
 if [ ${SEQMODE} == "single" ]; then
 	declare FILES1="${SOURCEDIR}*${SUFFIX1}"
@@ -148,7 +151,7 @@ for FILENAME in ${FILES1[@]}; do
 	fi
 done; fi
 
-# trimming paired end reads  
+# Trimming paired end reads  
 if [ ${SEQMODE} == "paired" ]; then
 	declare FILES1="${SOURCEDIR}*${PAIR1}${SUFFIX1}";
 	for FILENAME in ${FILES1[@]}; do
@@ -193,6 +196,8 @@ done; fi
 ####################################################
 ### Alignment of reads (paired end & single end) ###
 ####################################################
+
+if [ ${SEQTYPE} == "RNASeq" ]; then
 
 #Indexing reference genome for STAR
 cd ${GENOMEDIR}
@@ -334,6 +339,16 @@ sed -i 's/\.genes.results//g' ${Quant_DIR}/genes.data.tsv
 declare FILELIST=$(find ${Quant_DIR} -name "*isoforms.results"  -printf "%f\t")
 rsem-generate-data-matrix $FILELIST > ${Quant_DIR}/isoforms.data.tsv
 sed -i 's/\.genes.results//g' ${Quant_DIR}/isoforms.data.tsv
+
+
+else
+if [ ${SEQTYPE} == "TempOSeq" ]; then
+# Command Line Arguments:
+# 1: FASTA Reference File
+# 2: Directory of FASTQ files to align
+# 3: Number of CPUs to use
+Rscript ${TEMPOSEQR} ${GENOME} ${TRIMM_DIR} ${CPU_FOR_ALIGNMENT}
+fi
 
 ###################################################################################################
 ### Quality control raw reads: Fastp + RSEM + STAR MultiQC report ###
