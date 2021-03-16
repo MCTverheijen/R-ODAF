@@ -1,3 +1,4 @@
+#!/bin/bash
 ####################################################################################
 ### Sequencing R-ODAF, Omics Data Analysis Framework for Regulatory application  ###
 ####################################################################################
@@ -5,8 +6,8 @@
 ####################################################
 #### Settings which need to be adapted by user #####
 ####################################################
-source ~/miniconda3/etc/profile.d/conda.sh
-project=$1 # Call script using project name as the only argument
+source ${HOME}/miniconda3/etc/profile.d/conda.sh
+project="2021_Buick_HepaRG_TempOSeq" # $1 # Call script using project name as the only argument
 # Specify the directory for the output
 OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
 # Specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
@@ -14,26 +15,29 @@ RAW_SAMPLE_DIR="${HOME}/shared/projects/${project}/data/raw/"
 # Specify extention of input files (".fastq" or ".fastq.gz") 
 SUFFIX_INPUTFILES='.fastq.gz'
 # Specify the sequencing type (RNASeq or TempOSeq)
-SEQTYPE='TempOSeq'
+SEQTYPE="TempOSeq"
 # Specify the sequencing mode used to obtain the data
-SEQMODE="paired" #specify "paired" or "single" end mode
+SEQMODE="single" #specify "paired" or "single" end mode
 # Specify the read suffix (e.g. "_R1_001")
 PAIRED_END_SUFFIX_FORWARD="_R1_001"
 # *IF* paired end mode was used, specify the reverse suffix as well (e.g. "_R2")
 PAIRED_END_SUFFIX_REVERSE="_R2_001"
 
 # Choose the main organism for genome alignment (e.g "Rat_6.0.97"). {NOTE: This ID is a label specific for this script and is made for the user to identify which genome version was used. It can contain any text}.
-# hg38 | Rat_6.0.84
-ORGANISM_GENOME_ID="Rat_6.0.84"
+# hg38 | Rat_6.0.84 | S1500
+ORGANISM_GENOME_ID="S1500"
 # PATH/Directory in which the genome files are located
 # ${HOME}/shared/dbs/human/hg38/ | ${HOME}/shared/dbs/rat/ensembl/rnor6_0/v84/genome
-GENOME_FILES_DIR="${HOME}/shared/dbs/rat/ensembl/rnor6_0/v84/genome"
+# ${HOME}/shared/dbs/biospyder/R-Scripts/Human_S1500_Surrogate/TSQR_Scripts_Human_Surrogate_1.2/reference/humansurrogate1_2
+GENOME_FILES_DIR="${HOME}/shared/dbs/biospyder/R-Scripts/Human_S1500_Surrogate/TSQR_Scripts_Human_Surrogate_1.2/reference/humansurrogate1_2"
 # Filename of genome fasta file (without path)
-# Homo_sapiens_assembly38.fasta | Rnor_6.0.fa
-GENOME_FILE_NAME="Rnor_6.0.fa"
+# Homo_sapiens_assembly38.fasta | Rnor_6.0.fa 
+# S1500: humansurrogate1_2.fa
+GENOME_FILE_NAME="humansurrogate1_2.fa"
 # Filename of GTF file (without path)
 # hg38.ensGene.gtf | Rattus_norvegicus.Rnor_6.0.84.andERCC.gtf
-GTF_FILE_NAME="Rattus_norvegicus.Rnor_6.0.84.andERCC.gtf"
+# S1500: humansurrogate1_2.gtf
+GTF_FILE_NAME="humansurrogate1_2.gtf"
 # Whether the genome indexing has already been done. When "Yes" is specified, the indexing will be skipped. If "No" The index will be made
 GENOME_INDEX_ALREADY_AVAILABLE="Yes" #Specify "Yes" or "No"
 RSEM_INDEX_ALREADY_AVAILABLE="Yes" #Specify "Yes" or "No"
@@ -120,7 +124,7 @@ echo $SHELL
 echo "Activating required software."
 conda activate odaf
 
-###################################################################################################
+##################################
 ### Trimming raw reads : Fastp ###
 ##################################
 
@@ -340,14 +344,20 @@ declare FILELIST=$(find ${Quant_DIR} -name "*isoforms.results"  -printf "%f\t")
 rsem-generate-data-matrix $FILELIST > ${Quant_DIR}/isoforms.data.tsv
 sed -i 's/\.genes.results//g' ${Quant_DIR}/isoforms.data.tsv
 
-
 else
 if [ ${SEQTYPE} == "TempOSeq" ]; then
 # Command Line Arguments:
 # 1: FASTA Reference File
 # 2: Directory of FASTQ files to align
 # 3: Number of CPUs to use
+cd ${BASEDIR}
+echo "Parameters passed to Rscript for TempO-Seq Alignments..."
+echo ${TEMPOSEQR}
+echo ${GENOME}
+echo ${TRIMM_DIR}
+echo ${CPU_FOR_ALIGNMENT}
 Rscript ${TEMPOSEQR} ${GENOME} ${TRIMM_DIR} ${CPU_FOR_ALIGNMENT}
+fi
 fi
 
 ###################################################################################################
@@ -360,5 +370,7 @@ multiqc --cl_config "extra_fn_clean_exts: { '_fastp.json' }" ${BASEDIR} --filena
 
 ###################################################################################################
 
+conda env export > conda_environment.${mydate}.yml
+
 conda deactivate
-echo "Pre-processing of data complete"
+echo "Pre-processing of data complete."
