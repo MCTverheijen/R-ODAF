@@ -50,8 +50,8 @@ vignettes/*.pdf
 *bam
 *sam
 *results
-/DEG_output*
-/reports
+DEG_output*
+reports
 paths.txt
 *metadata.txt
 *contrasts.txt
