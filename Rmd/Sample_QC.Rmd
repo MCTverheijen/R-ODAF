@@ -8,7 +8,7 @@ output:
     theme: spacelab # flatly spacelab sandstone cerulean
     code_download: true
 title: "Study-wide sample quality control"
-subtitle: "Bisphenols Study"
+subtitle: "Study name"
 author: "Matthew J. Meier"
 ---
 
