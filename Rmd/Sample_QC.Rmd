@@ -8,7 +8,7 @@ output:
     theme: spacelab # flatly spacelab sandstone cerulean
     code_download: true
 title: "Study-wide sample quality control"
-subtitle: "Bisphenols Study"
+subtitle: "Study name"
 author: "Matthew J. Meier"
 ---
 
@@ -29,9 +29,13 @@ The metadata you use should have the following columns with T or F listed for ea
 clust_method="spearman" # For clustering
 tree_height_cutoff=0.1 # For clustering
 dendo_color_by="chemical" # Specify how you would like to color the dendograms
-nmr_threshold=100000 # 10% of 1M reads for TempOSeq
-sampledata_sep="," # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
-groups=c("group","batch","pool") # Column name(s) in your metadata to use for annotations of experimental groups
+nmr_threshold=100000 # 10% of 1M reads for TempOSeq = 100,000; 10% of 10M reads for RNA-Seq = 1,000,000.
+sampledata_sep="\t" # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
+groups=c("group","sex","pool") # Column name(s) in your metadata to use for annotations of experimental groups
+# Column names for metadata, if applicable
+technical_control="technical_control"
+reference_rna="reference_rna"
+solvent_control="solvent_control"
 ```
 
 ```{r load_libraries, message=F, warnings=F, echo=F}
@@ -201,7 +205,7 @@ dendo_before_all_samples <- 1-cor(as.matrix(cpm), method = clust_method)
 dendo_before_all_samples <- sort_hclust(hclust(as.dist(dendo_before_all_samples), method="average"))
 
 dendo_before_all_samples <- as.dendrogram(dendo_before_all_samples)
-colors_to_use <- as.numeric(as.factor(DESeqDesign[,"technical_control"]))
+colors_to_use <- as.numeric(as.factor(DESeqDesign[,technical_control]))
 ordered_colors <- colors_to_use[order.dendrogram(dendo_before_all_samples)]
 labels_colors(dendo_before_all_samples) <- ordered_colors
 
