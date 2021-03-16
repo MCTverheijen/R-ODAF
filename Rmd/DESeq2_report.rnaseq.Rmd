@@ -201,17 +201,6 @@ if(!dir.exists(paths$DEG_output)){dir.create(paths$DEG_output, recursive = TRUE)
 if(!dir.exists(paths$pathway_analysis)){dir.create(paths$pathway_analysis, recursive = TRUE)}
 if(!dir.exists(paths$RData)){dir.create(paths$RData, recursive = TRUE)}
 
-# FILES TO LOAD
-# A. Tab delimited file with merged RSEM.genes.results files:
-SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
-# B. Tab delimited sample information file with at least 2 columns:
-  # 1. sample names identical to the column names of sampleData
-  # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
-SampleKeyFile <- file.path(paths$metadata,"metadata.QC_applied.txt")
-# C. Tab delimited file of comparisons (contrasts) to test 
-# Group of interest in the left column, control for comparison in the right column
-ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
-
 # Specify which groups need to be compared 
 contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="\t", header=FALSE,  quote="\"")
 DESIGN <- params$design	# Column name which defines the groups to be compared
@@ -236,6 +225,30 @@ NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
 if(Platform=="TempO-Seq"){sampledata_sep <- ","} else {sampledata_sep <- "\t"}
 # Misc parameters
 digits = 2 # For rounding numbers
+
+################################################################################
+################################################################################
+#### FILES TO LOAD
+################################################################################
+################################################################################
+# A. Tab delimited file with merged RSEM.genes.results files:
+if(Platform=="TempO-Seq"){
+    SampleDataFile <- file.path(paths$processed,"count_table.csv")
+    sampledata_sep=","
+  }
+  else {
+    SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
+  }
+  
+# B. Tab delimited sample information file with at least 2 columns:
+  # 1. sample names identical to the column names of sampleData
+  # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
+SampleKeyFile <- file.path(paths$metadata,"metadata.QC_applied.txt")
+# C. Tab delimited file of comparisons (contrasts) to test 
+# Group of interest in the left column, control for comparison in the right column
+ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
+
+
 ```
 
 The code above (not shown by default) specifies user preferences and data locations.

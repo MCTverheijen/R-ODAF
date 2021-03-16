@@ -30,8 +30,9 @@ clust_method="spearman" # For clustering
 tree_height_cutoff=0.1 # For clustering
 dendo_color_by="chemical" # Specify how you would like to color the dendograms
 nmr_threshold=100000 # 10% of 1M reads for TempOSeq
-sampledata_sep="," # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
+sampledata_sep="\t" # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
 groups=c("group","batch","pool") # Column name(s) in your metadata to use for annotations of experimental groups
+Platform <- "TempO-Seq" # Or RNASeq
 ```
 
 ```{r load_libraries, message=F, warnings=F, echo=F}
@@ -81,7 +82,12 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ############################################################################
 
 # A. Tab delimited file with merged RSEM.genes.results files:
-SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
+if(Platform=="TempO-Seq") {
+    SampleDataFile <- file.path(paths$processed,"count_table.csv")
+    sampledata_sep <- ","
+  } else {
+    SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
+  }
 
 # B. Tab delimited sample information file with at least 2 columns:
 #    1. sample names identical to the column names of sampleData
@@ -121,6 +127,7 @@ nrow(d)
 ############################################################################
 #Checking row and column orderings
 ############################################################################
+all(names(sampleData) %in% d$original_names)
 all(names(sampleData) == d$original_names)
 ```
 
@@ -535,7 +542,6 @@ rownames(correlation_df_all) <- correlation_df_all$original_names
 correlation_df_all <- correlation_df_all[colnames(ref_correlations_all),]
 
 correlation_df_all_heatmap <- correlation_df_all[,c("batch",
-                                                    "pool",
                                                     "technical_control",
                                                     "reference_rna",
                                                     "solvent_control")]
