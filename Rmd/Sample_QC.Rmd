@@ -8,7 +8,7 @@ output:
     theme: spacelab # flatly spacelab sandstone cerulean
     code_download: true
 title: "Study-wide sample quality control"
-subtitle: "Study name"
+subtitle: "HepaRG TempO-Seq"
 author: "Matthew J. Meier"
 ---
 
@@ -30,8 +30,16 @@ clust_method="spearman" # For clustering
 tree_height_cutoff=0.1 # For clustering
 dendo_color_by="chemical" # Specify how you would like to color the dendograms
 nmr_threshold=100000 # 10% of 1M reads for TempOSeq = 100,000; 10% of 10M reads for RNA-Seq = 1,000,000.
+gini_cutoff=0.95
 sampledata_sep="," # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
-groups=c("group","sex","pool") # Column name(s) in your metadata to use for annotations of experimental groups
+groups=list() # Column name(s) in your metadata to use for annotations of experimental groups
+groups[[1]] <- c("group","chemical","dose")
+groups[[2]] <- c("I7_Index_ID","I5_Index_ID")
+groups[[3]] <- c("row","column")
+groups[[4]] <- c("sample_plate")
+batch_var <- "sample_plate"
+treatment_var <- "chemical"
+Platform <- "TempO-Seq" # Or RNA-Seq
 # Column names for metadata, if applicable
 technical_control="technical_control"
 reference_rna="reference_rna"
@@ -59,6 +67,8 @@ library(ComplexHeatmap)
 library(kableExtra)
 library(dendextend)
 library(dendsort)
+library(rrcov)
+library(cellWise)
 library(vtree) # Richard Webster and Nick Barrowman
 ```
 
@@ -222,8 +232,7 @@ labels_to_use <- DESeqDesign[,dendo_color_by]
 labels_to_use <- labels_to_use[order.dendrogram(dendo_before_all_samples)]
 labels_to_use <- paste(labels_to_use, original_names)
 
-par(cex=0.15, mar = c(15, 4, 4, 2))
-plot(dendo_before_all_samples %>% set("labels", labels_to_use),
+plot(dendo_before_all_samples %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -310,7 +319,7 @@ labels_to_use <- labels_to_use[order.dendrogram(dendo_before_tech_ctrls)]
 labels_to_use <- paste(labels_to_use, original_names)
 
 par(cex=0.4, mar = c(15, 4, 4, 2))
-plot(dendo_before_tech_ctrls %>% set("labels", labels_to_use),
+plot(dendo_before_tech_ctrls %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -356,7 +365,7 @@ labels_to_use <- labels_to_use[order.dendrogram(dendo_before_all_exp_samples)]
 labels_to_use <- paste(labels_to_use, original_names)
 
 par(cex=0.2, mar = c(15, 4, 4, 2))
-plot(dendo_before_all_exp_samples %>% set("labels", labels_to_use),
+plot(dendo_before_all_exp_samples %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -392,7 +401,7 @@ labels_to_use <- labels_to_use[order.dendrogram(dendo_before_all_exp_samples)]
 labels_to_use <- paste(labels_to_use, original_names)
 
 par(cex=0.2, mar = c(15, 4, 4, 2))
-plot(dendo_before_all_exp_samples %>% set("labels", labels_to_use),
+plot(dendo_before_all_exp_samples %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -401,6 +410,69 @@ dev.off()
 ```
 
 ## Additional QC metrics
+
+### Outlier Tests
+
+#### OutPyR
+
+This one throws a segfault and doesn't work. Ignore this.
+
+```{bash, eval=F}
+<!-- conda activate outpyr -->
+<!-- cd ./data/processed/ -->
+<!-- cat count_table.csv | tr , '\t' | tr -d '"' > count_table.tsv -->
+<!-- outpyr -j 39 count_table.tsv -->
+```
+
+#### OUTRIDER
+
+```{r}
+library(OUTRIDER)
+# Filter data to remove genes with zero
+sampleDataFilt <- sampleData %>% dplyr::select(all_of(sample_names))
+sampleDataFilt <- sampleDataFilt[rowSums(sampleDataFilt) > ncol(sampleData),]
+sampleDataFilt <- sampleDataFilt + 1 # Pseudocount
+DESeqDesignOUTRIDER <- DESeqDesign %>% dplyr::filter(original_names %in% sample_names)
+
+# Create OutriderDataSet object
+ods <- OutriderDataSet(countData=sampleDataFilt, colData=DESeqDesignOUTRIDER )
+plotCountCorHeatmap(ods, colGroups=unlist(groups[[1]]), normalized=FALSE, nRowCluster=4)
+plotCountGeneSampleHeatmap(ods, colGroups=unlist(groups[[1]]), normalized=FALSE, nRowCluster=4)
+
+# Confounders
+ods <- OUTRIDER::estimateSizeFactors(ods)
+small <- which(sizeFactors(ods) < 0.3)
+small
+ods <- ods[,ods$sizeFactor > 0.3]
+BPPARAM = MulticoreParam(workers = 41)
+# findEncodingDim(ods, BPPARAM = BPPARAM) # slow... crashes sometimes
+ods <- OUTRIDER::controlForConfounders(ods, BPPARAM=BPPARAM) # set q?
+
+ods <- fit(ods,BPPARAM=BPPARAM)
+ods <- computePvalues(ods,BPPARAM=BPPARAM)
+ods <- computeZscores(ods)
+res <- results(ods)
+
+plotQQ(ods, res[2, geneID])
+hist(theta(ods))
+tail(sort(aberrant(ods, by="sample")))
+plotAberrantPerSample(ods, padjCutoff=0.05)
+plotPowerAnalysis(ods)
+plotExpectedVsObservedCounts(ods, "CYP2C19_22478", basePlot=TRUE)
+
+# Plot again
+plotCountCorHeatmap(ods, normalized=TRUE, colGroups=unlist(groups[[1]]))
+
+potential_bad_samples <- res %>% dplyr::filter(AberrantBySample >1)
+potential_bad_samples
+potential_bad_samples %>% pull(sampleID) %>% unique()
+
+potential_bad_genes <- res %>% dplyr::filter(AberrantByGene >1)
+potential_bad_genes
+potential_bad_genes %>% pull(geneID) %>% unique()
+detach("package:OUTRIDER", unload=TRUE)
+```
+
 
 ### Number of mapped reads
 
@@ -544,7 +616,7 @@ correlation_df_all <- DESeqDesign %>%
 rownames(correlation_df_all) <- correlation_df_all$original_names
 correlation_df_all <- correlation_df_all[colnames(ref_correlations_all),]
 
-correlation_df_all_heatmap <- correlation_df_all[,c(groups,
+correlation_df_all_heatmap <- correlation_df_all[,c(unlist(groups[[1]]),
                                                     technical_control,
                                                     reference_rna,
                                                     solvent_control)]
@@ -565,6 +637,8 @@ pheatmap(ref_correlations_all,
 
 This shows the Pearson correlation of log2-normalized CPM of read counts across experimental samples.  Technical controls are excluded.
 
+This first plot shows every sample in the study:
+
 ```{r correlation_2, fig.width=11, fig.height=10}
 ref_correlations_samples <- cor(as.matrix(cpm %>%
                                             dplyr::select(all_of(sample_names))),
@@ -576,7 +650,7 @@ correlation_df_samples <- DESeqDesign %>%
 rownames(correlation_df_samples) <- correlation_df_samples$original_names
 correlation_df_samples <- correlation_df_samples[colnames(ref_correlations_samples),]
 
-correlation_df_samples_heatmap <- correlation_df_samples[,c(groups,
+correlation_df_samples_heatmap <- correlation_df_samples[,c(unlist(groups[[1]]),
                                                             technical_control,
                                                             reference_rna,
                                                             solvent_control)]
@@ -586,6 +660,81 @@ pheatmap(ref_correlations_samples,
          show_colnames = F,
          border_color=NA,
          annotation_col = correlation_df_samples_heatmap)
+
+```
+
+These plots show correlations within each experimental grouping.
+
+```{r, fig.width=11, fig.height=10}
+### To double check a group of interest...
+facets <- unique(DESeqDesignExpSamples[,treatment_var])
+cor_list <- list()
+for(i in seq_along(facets)) {
+  samples_in_facet <- DESeqDesignExpSamples[DESeqDesignExpSamples$chemical == facets[i],
+                                            "original_names"]
+  cpm_subset <- as.matrix(cpm %>% dplyr::select(all_of(samples_in_facet)))
+  pca_subset <- rrcov::PcaGrid(t(cpm_subset))
+  #biplot <- rrcov::biplot(pca_subset)
+  cellWise::outlierMap(pca_subset)
+  
+  correlations <- cor(cpm_subset, method = "pearson")
+  correlation_df <- DESeqDesign %>%
+    filter(original_names %in% colnames(correlations))
+  
+  row.names(correlation_df) <- correlation_df$original_names
+  correlation_df <- correlation_df[colnames(correlations),]
+  
+  correlation_df <- as.data.frame(correlation_df[unlist(groups[[1]][1])])
+  
+  group_heatmap <- pheatmap(correlations,
+                            annotation_col = correlation_df,
+                            display_numbers = T,
+                            cutree_cols = 2,
+                            cutree_rows = 2)
+  print(group_heatmap)
+  correlations <- as.data.frame(correlations)
+  correlations$original_names <- row.names(correlations)
+  cor_distribution <- correlations %>%
+    mutate(mean = rowMeans(across(where(is.numeric)))) %>%
+    dplyr::select(mean, original_names) %>%
+    mutate(facet=facets[i])
+  cor_list[[i]] <- cor_distribution
+  #group_box <- ggplot(cor_distribution, aes(facet, mean)) + geom_boxplot() + geom_jitter()
+  #print(group_box)
+}
+```
+
+## Distribution of correlations
+
+### Mean of per-sample correlations with every other sample in the study
+
+In other words, for each sample, what is its mean correlation with every other sample?
+
+```{r,  fig.width=11, fig.height=10}
+cor_df1 <- as.data.frame(ref_correlations_samples)
+cor_df1$original_names <- row.names(cor_df1)
+cor_df2 <- DESeqDesignExpSamples[c(treatment_var,"original_names")]
+# STUDY WIDE CORRELATION MEANS
+cor_distribution_all <- left_join(cor_df1, cor_df2) %>%
+    mutate(mean = rowMeans(across(where(is.numeric)))) %>%
+    dplyr::select(mean, original_names, treatment_var)
+ggplot(cor_distribution_all, aes(!!ensym(treatment_var), mean)) +
+  geom_boxplot(outlier.shape = NA) + geom_jitter()
+ggplot(cor_distribution_all, aes(!!ensym(treatment_var), mean)) +
+  geom_boxplot(outlier.shape = NA) + geom_jitter() + ylim(c(0.9,1))
+```
+
+### Mean of per-sample correlations with every other sample in its corresponding group
+
+In other words, for each sample, what is its mean correlation with every other sample **within in its epxerimental grouping**?
+
+```{r,  fig.width=11, fig.height=10}
+# MEANS BY CHEMICAL
+cor_means_by_chem <- data.table::rbindlist(cor_list)
+ggplot(cor_means_by_chem, aes(facet, mean)) +
+  geom_boxplot(outlier.shape = NA) + geom_jitter()
+ggplot(cor_means_by_chem, aes(facet, mean)) +
+  geom_boxplot(outlier.shape = NA) + geom_jitter() + ylim(c(0.9,1))
 
 ```
 
@@ -605,7 +754,7 @@ correlation_df <- DESeqDesign %>%
 row.names(correlation_df) <- correlation_df$original_names
 correlation_df <- correlation_df[colnames(ref_correlations),]
 
-correlation_df <- as.data.frame(correlation_df[,groups], drop=FALSE)
+correlation_df <- as.data.frame(correlation_df[,unlist(groups[[1]])], drop=FALSE)
 
 pheatmap(ref_correlations,
          annotation_col = correlation_df,
@@ -632,6 +781,7 @@ annotation_col <- HeatmapAnnotation(df=correlation_df)
 
 # ref_correlations
 
+
 ```
 
 
@@ -657,28 +807,47 @@ d %>%
 # Removing Outliers
 ############################################################################
 QAQC_pass_fail <- QAQC
-QAQC_pass_fail[QAQC$NMR < nmr_threshold,]$NMR <- "FAIL"
-QAQC_pass_fail[QAQC$NMR >= nmr_threshold,]$NMR <- "PASS"
-QAQC_pass_fail[QAQC$Ncov5 < percent_active_probes$stats[1,1],]$Ncov5 <- "FAIL"
-QAQC_pass_fail[QAQC$Ncov5 >= percent_active_probes$stats[1,1],]$Ncov5 <- "PASS"
-QAQC_pass_fail[QAQC$Nsig80 < probes_capturing_top_80$stats[1,1],]$Nsig80 <- "FAIL"
-QAQC_pass_fail[QAQC$Nsig80 >= probes_capturing_top_80$stats[1,1],]$Nsig80 <- "PASS"
-QAQC_pass_fail[QAQC$Gini > 0.95,]$Gini <- "FAIL"
-QAQC_pass_fail[QAQC$Gini <= 0.95,]$Gini <- "PASS"
-  
+QAQC_pass_fail$NMR <- cut(QAQC$NMR,
+                          c(-Inf, nmr_threshold, Inf),
+                          labels=c("FAIL","PASS"), right=F)
+QAQC_pass_fail$Ncov5 <- cut(QAQC$Ncov5,
+                            c(-Inf, percent_active_probes$stats[1,1], Inf),
+                            labels=c("FAIL","PASS"), right=F)
+QAQC_pass_fail$Nsig80 <- cut(QAQC$Nsig80,
+                             c(-Inf, probes_capturing_top_80$stats[1,1], Inf),
+                             labels=c("FAIL","PASS"), right=F)
+QAQC_pass_fail$Gini <- cut(QAQC$Gini,
+                           c(-Inf, gini_cutoff, Inf),
+                           labels=c("PASS","FAIL"), right=F)
+
+# QAQC_pass_fail[QAQC$NMR < nmr_threshold,]$NMR <- "FAIL"
+# QAQC_pass_fail[QAQC$NMR >= nmr_threshold,]$NMR <- "PASS"
+# QAQC_pass_fail[QAQC$Ncov5 < percent_active_probes$stats[1,1],]$Ncov5 <- "FAIL"
+# QAQC_pass_fail[QAQC$Ncov5 >= percent_active_probes$stats[1,1],]$Ncov5 <- "PASS"
+# QAQC_pass_fail[QAQC$Nsig80 < probes_capturing_top_80$stats[1,1],]$Nsig80 <- "FAIL"
+# QAQC_pass_fail[QAQC$Nsig80 >= probes_capturing_top_80$stats[1,1],]$Nsig80 <- "PASS"
+# QAQC_pass_fail[QAQC$Gini > 0.95,]$Gini <- "FAIL"
+# QAQC_pass_fail[QAQC$Gini <= 0.95,]$Gini <- "PASS"
+
 QAQC_failed <- QAQC_pass_fail %>%
   dplyr::rowwise() %>% 
   dplyr::filter_all(any_vars(str_detect(., pattern = "FAIL")))
 
-QAQC_failed_logical <- as.data.frame(QAQC_failed)
+#QAQC_failed_logical <- as.data.frame(QAQC_failed)
+QAQC_failed_logical <- lapply(QAQC_failed, as.character)
+QAQC_failed_logical <- as.data.frame(QAQC_failed_logical)
 QAQC_failed_logical[QAQC_failed_logical=="FAIL"] <- 1
 QAQC_failed_logical[QAQC_failed_logical=="PASS"] <- 0
 #apply(QAQC_failed_logical_matrix, 2, as.numeric)
 
 QAQC_failed_logical <- QAQC_failed_logical %>%
-  dplyr::left_join(d %>% dplyr::select(original_names, group),
+  dplyr::left_join(d %>% dplyr::select(original_names, groups[[1]][1]),
                    by=(c("Sample"="original_names"))) %>%
-  dplyr::mutate_if(is.character, as.numeric)
+  dplyr::mutate(NMR=as.numeric(NMR),
+                Ncov5=as.numeric(Ncov5),
+                Nsig80=as.numeric(Nsig80),
+                Gini=as.numeric(Gini),
+                Dendogram=as.numeric(Dendogram))
 
 ```
 
@@ -719,9 +888,8 @@ vtree(QAQC_annotated,
 outliers <- QAQC_failed$Sample
 outliers
 
-flag_outliers <- d$original_names %in% outliers
-outlier_metadata <- d[flag_outliers,]
-metadata_outliers_removed <- DESeqDesign[!flag_outliers,] %>%
+outlier_metadata <- DESeqDesign[DESeqDesign$original_names %in% outliers,]
+metadata_outliers_removed <- DESeqDesign[!DESeqDesign$original_names %in% outliers,] %>%
   filter(!!ensym(technical_control)==F)
 
 ```
@@ -740,50 +908,85 @@ Please note that in these pairwise plots, some relationships are meaningless (e.
 ### Common columns - vector of NMR_data, Ncov5_data, Nsig80_data, Gini_data
 
 QAQC_metadata_subset <- QAQC_annotated %>%
-  dplyr::select(row,
-                column,
-                I7_Index_ID,
-                I5_Index_ID,
-                pool,
-                dose,
-                chemical,
-                batch,
+  dplyr::select(unlist(groups),
                 NMR_data, Ncov5_data, Nsig80_data, Gini_data)
 
 # This is too much.
 # ggpairs(QAQC_metadata_subset,
 #         cardinality_threshold = 24)
 
-QAQC_metadata_subset$pool <- factor(QAQC_metadata_subset$pool)
-QAQC_metadata_subset$dose <- factor(log(QAQC_metadata_subset$dose+1))
+# Need a generic way to make factors where appropriate...
+# QAQC_metadata_subset$pool <- factor(QAQC_metadata_subset$pool)
+# QAQC_metadata_subset[sapply(QAQC_metadata_subset, is.character)] <- 
+#   lapply(QAQC_metadata_subset[sapply(QAQC_metadata_subset, is.character)], as.factor)
+QAQC_metadata_subset %>%
+    summarise_each(levels(as.factor(.))) %>% tally()
+
+potential_covariates <- QAQC_metadata_subset %>%
+  dplyr::mutate_all(as.factor) %>%
+  purrr::map(levels) %>%
+  purrr::map(length)
+
+covariate_names <- names(potential_covariates[potential_covariates < 24])
+
+# Need a generic way to look for dose column...
+#QAQC_metadata_subset$dose <- factor(log(QAQC_metadata_subset$dose+1))
+
+# for(i in seq_along(covariate_names)) {
+#   ggpairs(QAQC_metadata_subset,
+#           cardinality_threshold = 24,
+#           columns=c(covariate_names,
+#                     "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
+#           ggplot2::aes(colour=groups[[1]][1]))
+# }
+
+# for(i in seq_along(groups)) {
+#   group_comparison <- groups[[i]]
+#   ggpairs(QAQC_metadata_subset,
+#           cardinality_threshold = 24,
+#           columns=c(unlist(group_comparison),
+#                     "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
+#           ggplot2::aes(colour=groups[[1]][1]))
+# }
 
 ggpairs(QAQC_metadata_subset,
         cardinality_threshold = 24,
-        columns=c("row",
-                  "column",
+        columns=c(unlist(groups[[2]]),
                   "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
-        ggplot2::aes(colour=batch))
+        ggplot2::aes(colour=!!ensym(batch_var)))
 
 ggpairs(QAQC_metadata_subset,
         cardinality_threshold = 24,
-        columns=c("I7_Index_ID",
-                  "I5_Index_ID",
+        columns=c(unlist(groups[[3]]),
                   "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
-        ggplot2::aes(colour=batch))
+        ggplot2::aes(colour=!!ensym(batch_var)))
 
 ggpairs(QAQC_metadata_subset,
         cardinality_threshold = 24,
-        columns=c("pool",
-                  "batch",
+        columns=c(unlist(groups[[4]]),
                   "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
-        ggplot2::aes(colour=batch))
+        ggplot2::aes(colour=!!ensym(batch_var)))
 
-ggpairs(QAQC_metadata_subset,
-        cardinality_threshold = 24,
-        columns=c("dose",
-                  "chemical",
-                  "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
-        ggplot2::aes(colour=batch))
+# ggpairs(QAQC_metadata_subset,
+#         cardinality_threshold = 24,
+#         columns=c("I7_Index_ID",
+#                   "I5_Index_ID",
+#                   "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
+#         ggplot2::aes(colour=batch))
+# 
+# ggpairs(QAQC_metadata_subset,
+#         cardinality_threshold = 24,
+#         columns=c("pool",
+#                   "batch",
+#                   "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
+#         ggplot2::aes(colour=batch))
+# 
+# ggpairs(QAQC_metadata_subset,
+#         cardinality_threshold = 24,
+#         columns=c("dose",
+#                   "chemical",
+#                   "NMR_data", "Ncov5_data", "Nsig80_data", "Gini_data"),
+#         ggplot2::aes(colour=batch))
 
 
 ```
@@ -799,7 +1002,7 @@ ggplot(QAQC_annotated, aes(x = factor(column),
   geom_point(mapping=aes(color = NMR_data), data=QAQC_annotated, size=3) +
     scale_x_discrete(position = "top") +
   coord_fixed() +
-  facet_wrap(~batch) +
+  facet_wrap(paste0("~",batch_var)) +
   ggtitle("Number of mapped reads") +
   theme_bw() +
   theme(legend.position = "bottom",
@@ -813,7 +1016,7 @@ ggplot(QAQC_annotated, aes(x = factor(column),
   geom_point(mapping=aes(color = Nsig80_data), data=QAQC_annotated, size=3) +
     scale_x_discrete(position = "top") +
   coord_fixed() +
-  facet_wrap(~batch) +
+  facet_wrap(paste0("~",batch_var)) +
   ggtitle("Nsig80") +
   theme_bw() +
   theme(legend.position = "bottom",
@@ -827,7 +1030,7 @@ ggplot(QAQC_annotated, aes(x = factor(column),
   geom_point(mapping=aes(color = Ncov5_data), data=QAQC_annotated, size=3) +
     scale_x_discrete(position = "top") +
   coord_fixed() +
-  facet_wrap(~batch) +
+  facet_wrap(paste0("~",batch_var)) +
   ggtitle("Ncov5") +
   theme_bw() +
   theme(legend.position = "bottom",
@@ -841,7 +1044,7 @@ ggplot(QAQC_annotated, aes(x = factor(column),
   geom_point(mapping=aes(color = Gini_data), data=QAQC_annotated, size=3) +
     scale_x_discrete(position = "top") +
   coord_fixed() +
-  facet_wrap(~batch) +
+  facet_wrap(paste0("~",batch_var)) +
   ggtitle("Gini") +
   theme_bw() +
   theme(legend.position = "bottom",
@@ -855,7 +1058,7 @@ ggplot(QAQC_annotated, aes(x = factor(column),
   geom_point(mapping=aes(color = Any), data=QAQC_annotated, size=3) +
     scale_x_discrete(position = "top") +
   coord_fixed() +
-  facet_wrap(~batch) +
+  facet_wrap(paste0("~",batch_var)) +
   ggtitle("Any samples failed") +
   theme_bw() +
   theme(legend.position = "bottom",
@@ -925,11 +1128,14 @@ write.table(outlier_metadata_annotated,
             file.path(paths$processed, "samples_removed.txt"),
             sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
 
+write.table(QAQC_annotated,
+            file.path(paths$processed, "QC_per_sample.txt"),
+            sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
+
 write.table(metadata_outliers_removed,
             file.path(paths$metadata, "metadata.QC_applied.txt"),
             sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE)
 
-d_filtered <- d[!(flag_outliers),]
 sampleData_filtered <- sampleData %>% dplyr::select(-all_of(outliers))
 ncol(sampleData_filtered)
 ```
@@ -965,7 +1171,7 @@ labels_to_use <- labels_to_use[order.dendrogram(dendo_after_all_samples)]
 labels_to_use <- paste(labels_to_use, original_names)
 
 par(cex=0.15, mar = c(15, 4, 4, 2))
-plot(dendo_after_all_samples %>% set("labels", labels_to_use),
+plot(dendo_after_all_samples %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -1006,7 +1212,7 @@ labels_to_use <- labels_to_use[order.dendrogram(dendo_after_tech_ctrls)]
 labels_to_use <- paste(labels_to_use, original_names)
 
 par(cex=0.4, mar = c(15, 4, 4, 2))
-plot(dendo_after_tech_ctrls %>% set("labels", labels_to_use),
+plot(dendo_after_tech_ctrls %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -1036,7 +1242,7 @@ DESeqDesignExpSamples <- DESeqDesign %>% dplyr::filter(original_names %in% all_o
 dendo_after_all_exp_samples <- sort_hclust(hclust(as.dist(dendo_after_all_exp_samples), method="average"))
 
 dendo_after_all_exp_samples <- as.dendrogram(dendo_after_all_exp_samples)
-colors_to_use <- as.numeric(as.factor(DESeqDesignExpSamples[,"dose"]))
+colors_to_use <- as.numeric(as.factor(DESeqDesignExpSamples[,unlist(groups)[1]]))
 ordered_colors <- colors_to_use[order.dendrogram(dendo_after_all_exp_samples)]
 labels_colors(dendo_after_all_exp_samples) <- ordered_colors
 
@@ -1048,7 +1254,7 @@ labels_to_use <- labels_to_use[order.dendrogram(dendo_after_all_exp_samples)]
 labels_to_use <- paste(labels_to_use, original_names)
 
 par(cex=0.2, mar = c(15, 4, 4, 2))
-plot(dendo_after_all_exp_samples %>% set("labels", labels_to_use),
+plot(dendo_after_all_exp_samples %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -1090,7 +1296,7 @@ labels_to_use <- labels_to_use[order.dendrogram(dendo_after_all_exp_samples)]
 labels_to_use <- paste(labels_to_use, original_names)
 
 par(cex=0.2, mar = c(15, 4, 4, 2))
-plot(dendo_after_all_exp_samples %>% set("labels", labels_to_use),
+plot(dendo_after_all_exp_samples %>% dendextend::set("labels", labels_to_use),
      main = "log2 CPM",
      horiz = F)
 abline(h=tree_height_cutoff, col = "red", lwd = 2)
@@ -1103,27 +1309,27 @@ dev.off()
 ### Batch
 
 ```{r plot_batch_effects}
-ggplot(QAQC_annotated, aes(x=batch, color=chemical)) +
+ggplot(QAQC_annotated, aes(x=batch_var, color=treatment_var)) +
   geom_boxplot(aes(y=Gini_data)) +
-  facet_grid(~batch, scales = "free_x") +
+  facet_grid(paste0("~",batch_var), scales = "free_x") +
   ggtitle("Gini") +
   theme(legend.position = "bottom")
 
-ggplot(QAQC_annotated, aes(x=batch, color=chemical)) +
+ggplot(QAQC_annotated, aes(x=batch_var, color=treatment_var)) +
   geom_boxplot(aes(y=NMR_data)) +
-  facet_grid(~batch, scales = "free_x") +
+  facet_grid(paste0("~",batch_var), scales = "free_x") +
   ggtitle("Number of Mapped Reads") +
   theme(legend.position = "bottom")
 
-ggplot(QAQC_annotated, aes(x=batch, color=chemical)) +
+ggplot(QAQC_annotated, aes(x=batch_var, color=treatment_var)) +
   geom_boxplot(aes(y=Ncov5_data)) +
-  facet_grid(~batch, scales = "free_x") +
+  facet_grid(paste0("~",batch_var), scales = "free_x") +
   ggtitle("Proportion of active probes (% probes with >5 mapped reads)") +
   theme(legend.position = "bottom")
 
-ggplot(QAQC_annotated, aes(x=batch, color=chemical)) +
+ggplot(QAQC_annotated, aes(x=batch_var, color=treatment_var)) +
   geom_boxplot(aes(y=Nsig80_data)) +
-  facet_grid(~batch, scales = "free_x") +
+  facet_grid(paste0("~",batch_var), scales = "free_x") +
   ggtitle("Proportion of probes required to account for 80% of signal") +
   theme(legend.position = "bottom")
 
@@ -1132,24 +1338,24 @@ ggplot(QAQC_annotated, aes(x=batch, color=chemical)) +
 ### Dose effects
 
 ```{r plot_chemical_differences}
-ggplot(QAQC_annotated, aes(x=chemical, color=factor(dose))) +
+ggplot(QAQC_annotated, aes(x=treatment_var, color=factor(dose))) +
   geom_boxplot(aes(y=Gini_data)) +
-  facet_wrap(~chemical, scales = "free_x") +
+  facet_wrap(paste0("~",treatment_var), scales = "free_x") +
   ggtitle("Gini")
 
-ggplot(QAQC_annotated, aes(x=chemical, color=factor(dose))) +
+ggplot(QAQC_annotated, aes(x=treatment_var, color=factor(dose))) +
   geom_boxplot(aes(y=NMR_data)) +
-  facet_wrap(~chemical, scales = "free_x") +
+  facet_wrap(paste0("~",treatment_var), scales = "free_x") +
   ggtitle("Number of Mapped Reads")
 
-ggplot(QAQC_annotated, aes(x=chemical, color=factor(dose))) +
+ggplot(QAQC_annotated, aes(x=treatment_var, color=factor(dose))) +
   geom_boxplot(aes(y=Ncov5_data)) +
-  facet_wrap(~chemical, scales = "free_x") +
+  facet_wrap(paste0("~",treatment_var), scales = "free_x") +
   ggtitle("Proportion of active probes (% probes with >5 mapped reads)")
 
-ggplot(QAQC_annotated, aes(x=chemical, color=factor(dose))) +
+ggplot(QAQC_annotated, aes(x=treatment_var, color=factor(dose))) +
   geom_boxplot(aes(y=Nsig80_data)) +
-  facet_wrap(~chemical, scales = "free_x") +
+  facet_wrap(paste0("~",treatment_var), scales = "free_x") +
   ggtitle("Proportion of probes required to account for 80% of signal")
 
 ```
