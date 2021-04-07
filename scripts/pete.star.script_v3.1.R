@@ -177,6 +177,8 @@ ll          <- rbind(unmapped=unmapped, mapped=three)
 write.csv(as.matrix(ll), "mapped_unmapped.csv")
 cat("Mapped/Unmapped Table Completed\n")
 
+sessioninfo::session_info()
+
 #stop logging
 sink()
 

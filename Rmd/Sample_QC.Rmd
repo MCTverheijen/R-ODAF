@@ -699,8 +699,6 @@ for(i in seq_along(facets)) {
     dplyr::select(mean, original_names) %>%
     mutate(facet=facets[i])
   cor_list[[i]] <- cor_distribution
-  #group_box <- ggplot(cor_distribution, aes(facet, mean)) + geom_boxplot() + geom_jitter()
-  #print(group_box)
 }
 ```
 
