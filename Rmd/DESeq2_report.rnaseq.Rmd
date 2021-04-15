@@ -192,30 +192,11 @@ The code above (not shown by default) loads the relevant R packages required for
 ## Specify parameters
 
 ```{r setup_code, warning=FALSE, message=FALSE, collapse=TRUE}
-###################################################################################
-###################################################################################
+################################################################################
+################################################################################
 # PARAMETERS TO SET MANUALLY                            		 
-#
-# Set file locations
-if(!dir.exists(paths$DEG_output)){dir.create(paths$DEG_output, recursive = TRUE)}
-if(!dir.exists(paths$pathway_analysis)){dir.create(paths$pathway_analysis, recursive = TRUE)}
-if(!dir.exists(paths$RData)){dir.create(paths$RData, recursive = TRUE)}
-
-# FILES TO LOAD
-# A. Tab delimited file with merged RSEM.genes.results files:
-SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
-# B. Tab delimited sample information file with at least 2 columns:
-  # 1. sample names identical to the column names of sampleData
-  # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
-SampleKeyFile <- file.path(paths$metadata,"metadata.QC_applied.txt")
-# C. Tab delimited file of comparisons (contrasts) to test 
-# Group of interest in the left column, control for comparison in the right column
-ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
-
-# Specify which groups need to be compared 
-contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="\t", header=FALSE,  quote="\"")
-DESIGN <- params$design	# Column name which defines the groups to be compared
-intgroup <- params$intgroup # "Interesting groups" - an experimental group and/or covariates
+################################################################################
+################################################################################
 
 # Various plotting and display options
 nBestFeatures <- 20 # The number of best features to make plots of their counts
@@ -233,9 +214,40 @@ if(is.na(params$group_filter)){
 # Specify used platform/technology for data generation:
 Platform <- params$platform # Should be one of "RNA-Seq" or "TempO-Seq"
 NORM_TYPE <- paste0(analysisID, "_DESeq2_", Platform)
-if(Platform=="TempO-Seq"){sampledata_sep <- ","} else {sampledata_sep <- "\t"}
 # Misc parameters
 digits = 2 # For rounding numbers
+
+################################################################################
+################################################################################
+#### FILES TO LOAD
+################################################################################
+################################################################################
+# A. Tab delimited file with merged RSEM.genes.results files:
+if(Platform=="TempO-Seq"){
+    SampleDataFile <- file.path(paths$processed,"count_table.csv")
+    sampledata_sep=","
+  } else {
+    SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
+  }
+  
+# B. Tab delimited sample information file with at least 2 columns:
+  # 1. sample names identical to the column names of sampleData
+  # 2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
+SampleKeyFile <- file.path(paths$metadata,"metadata.QC_applied.txt")
+# C. Tab delimited file of comparisons (contrasts) to test 
+# Group of interest in the left column, control for comparison in the right column
+ContrastsFile <- file.path(paths$metadata,"contrasts.txt")
+
+# Set file locations
+if(!dir.exists(paths$DEG_output)){dir.create(paths$DEG_output, recursive = TRUE)}
+if(!dir.exists(paths$pathway_analysis)){dir.create(paths$pathway_analysis, recursive = TRUE)}
+if(!dir.exists(paths$RData)){dir.create(paths$RData, recursive = TRUE)}
+
+# Specify which groups need to be compared 
+contrasts <- read.delim(ContrastsFile, stringsAsFactors=FALSE, sep="\t", header=FALSE,  quote="\"")
+DESIGN <- params$design	# Column name which defines the groups to be compared
+intgroup <- params$intgroup # "Interesting groups" - experimental group/covariates
+
 ```
 
 The code above (not shown by default) specifies user preferences and data locations.
@@ -286,8 +298,12 @@ if(any(!is.na(params$exclude_groups))) {
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
 }
 if(!is.na(params$include_only_column) & !is.na(params$include_only_group)) {
-  DESeqDesign <- DESeqDesign %>% dplyr::filter((!!sym(params$include_only_column)) %in% params$include_only_group)
-  limit_contrasts <- DESeqDesign %>% pull(!!sym(params$design)) %>% unique() %>% as.character()
+  DESeqDesign <- DESeqDesign %>%
+    dplyr::filter((!!sym(params$include_only_column)) %in% params$include_only_group)
+  limit_contrasts <- DESeqDesign %>%
+    pull(!!sym(params$design)) %>%
+    unique() %>%
+    as.character()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% limit_contrasts)
 }
 
@@ -400,9 +416,8 @@ samples_after <- nrow(DESeqDesign)
 head(rownames(DESeqDesign))
 head(colnames(sampleData)) # Output should match
 
-intgroups <- params$intgroup
 # Intgroups need to be factors for DESeq2
-DESeqDesign[intgroups] <- lapply(DESeqDesign[intgroups], factor)
+DESeqDesign[intgroup] <- lapply(DESeqDesign[intgroup], factor)
 if(!is.na(params$design)) {
   # If there is a dose column, reorder the experimental group (DESIGN) by dose.
   if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
@@ -428,8 +443,10 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.na(params$group_facet)
       load(file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
       } else {
       dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
-                                    colData = as.data.frame(DESeqDesign),
-                                    design = formula(paste("~", DESIGN)) ) # replace with intgroups if you have a good reason to
+                                    colData   = as.data.frame(DESeqDesign),
+                                    design    = formula(paste0(paste0("~"),
+                                                            paste0(intgroup,
+                                                                   collapse = " + "))) )
       dds <- dds[,rownames(DESeqDesign)]
       dds <- dds[rowSums(counts(dds)) > 1]
       dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(params$cpus))
@@ -652,7 +669,8 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 	print(paste(condition2, " vs ", condition1, ":", NORM_TYPE))
 	
 	DE_Design <- matrix(data=NA, ncol=2)
-	DE_Design <- as.matrix(DESeqDesign[c(grep(condition1,DESeqDesign[,DESIGN]), grep(condition2,DESeqDesign[,DESIGN])),])
+	DE_Design <- as.matrix(DESeqDesign[DESeqDesign[,DESIGN] %in% c(condition1,
+	                                                               condition2),])
 	samples   <- sampleData[, rownames(DE_Design)]
 	colnames(samples) <- NULL
 	
@@ -684,8 +702,8 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 
 	print("Obtaining the DESeq2 results")
 	currentContrast <- c(DESIGN, condition2, condition1)
-	res <- results(dds[idx],
-	               parallel = TRUE, BPPARAM=MulticoreParam(39),
+	res <- DESeq2::results(dds[idx],
+	               parallel = TRUE, BPPARAM=MulticoreParam(41),
 	               contrast=currentContrast,
 	               pAdjustMethod= 'fdr',
 	               cooksCutoff=cooks) # Cooks cutoff disabled - manually inspect.
@@ -1175,7 +1193,7 @@ sampleDistMatrix <- as.matrix(sampleDists)
 # colnames(sampleDistMatrix) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
 #      paste, collapse = ' : ')
 
-distances_df <- as.data.frame(colData(rld)[,params$intgroup])
+distances_df <- as.data.frame(colData(rld)[,intgroup, drop=F])
 # apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
 
 ## Define colors to use for the heatmap
@@ -1211,7 +1229,7 @@ sampleDistMatrixDEGs <- as.matrix(sampleDistsDEGs)
 # colnames(sampleDistMatrixDEGs) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
 #     paste, collapse = ' : ')
 
-distances_df <- as.data.frame(colData(rld)[,params$intgroup])
+distances_df <- as.data.frame(colData(rld)[,intgroup, drop=F])
 # apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
 
 ## Define colors to use for the heatmap
@@ -1243,7 +1261,7 @@ sampleDistMatrixTop <- as.matrix(sampleDistsTop)
 # colnames(sampleDistMatrixTop) <- apply(as.data.frame(colData(rld)[, "original_names"]), 1,
 #     paste, collapse = ' : ')
 
-distances_df <- as.data.frame(colData(rld)[,params$intgroup])
+distances_df <- as.data.frame(colData(rld)[,intgroup, drop=F])
 # apply(as.data.frame(colData(rld)[, params$design]), 1, paste, collapse = ' : ')
 
 ## Define colors to use for the heatmap
@@ -1268,7 +1286,7 @@ This plot shows how samples are clustered based on their euclidean distance usin
 mat <- assay(rld)[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]
 mat <- mat - rowMeans(mat)
 
-heatmap_df <- as.data.frame(colData(rld)[,params$intgroup])
+heatmap_df <- as.data.frame(colData(rld)[,intgroup, drop=F])
 row.names(heatmap_df) <- colData(rld)$original_names # Customize!
 pheatmap(mat,
          annotation_col=heatmap_df,

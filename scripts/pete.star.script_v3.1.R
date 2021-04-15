@@ -6,7 +6,7 @@
 # 3: Number of CPUs to use
 
 # Activate Conda environment for TempO-Seq and Required Software
-system2("conda activate temposeq")
+# system2("conda activate temposeq")
 
 run.alignment.analysis.fn <- function(fasta, queryDirectory, num_clusters){
 
@@ -24,7 +24,6 @@ print(paste0("FASTA: ", fasta))
 # Get path of reference directory (trim filename)
 ref_dir <- dirname(fasta)
 print(paste0("ref_dir: ", ref_dir))
-print(paste0("What happens here?"))
 print(paste0("FASTQ_dir: ", queryDirectory))
 print(paste0("Removing old temp files..."))
 
@@ -44,7 +43,14 @@ print(paste0("Creating new temp directories"))
 dir.create("proba")
 dir.create("fastqs")
 print(paste0("Copying FASTQs"))
-copy_fastqs <- paste0("ln -s ", queryDirectory, "* ./fastqs/")
+#copy_fastqs <- paste0("ln -s ", queryDirectory, "* ./fastqs/")
+fastq_paths <- list.files(path=queryDirectory,
+                          recursive = F,
+                          full.names = T,
+                          all.files = F,
+                          pattern = "fastq|fq",
+                          ignore.case = T)
+copy_fastqs <- paste0("ln -s ", paste(fastq_paths, collapse=' '), " ./fastqs/")
 system(copy_fastqs)
 queryDirectory <- "fastqs/"
 
@@ -53,16 +59,19 @@ annotFile <- gsub("\\.fa", ".gtf", fasta)
 print(paste0("Making cluster"))
 # Make the number of clusters you want to use
 cl <- makeCluster(num_clusters)
+# Number of CPUs per STAR instance
+cores <- floor(num_clusters/7)
 print(paste0("Getting list of files"))
 
 # Get list of FASTQ files
-get_files <- paste0("ls ", queryDirectory, " > samplefile.txt")
+# This globbing is not going to be foolproof. Very permissive.
+get_files <- paste0("ls ", queryDirectory, "> samplefile.txt")
 append_files <- paste0("sed -e 's|^|", queryDirectory, "|' -i samplefile.txt")
 system(get_files)
 
 # Add FASTQ path to file name
 system(append_files)
-print(paste0("Starting alignment function"))
+print(paste0("Loading alignment function..."))
 
 ###############################################################################
 # Alignment Function
@@ -103,22 +112,28 @@ cmd.notZipped <- paste("STAR --genomeDir ",
 print(cmd.notZipped)
 system(cmd.notZipped)
 }
-cmd.samtools <- paste("samtools index ",paste(x,"Aligned.sortedByCoord.out.bam",sep=""),sep="")
+cmd.samtools <- paste("samtools index ",
+                      paste(x,"Aligned.sortedByCoord.out.bam",sep=""),
+                      sep="")
 system(cmd.samtools)
 }
 # End Alignment
+print(paste0("Alignment function loaded."))
 
 ###############################################################################
 # Import sample file
+print(paste0("Importing sample file names..."))
 sampleF <- read.table("samplefile.txt", header=F, as.is=T)
 sampleF <- sampleF$V1
 # Get sample names
 sampleFile2.bam <- as.data.frame(sampleF)
 
 # Run star Alignment
-mclapply(sampleF, FUN=aligning.fn, mc.cores=2)
+print(paste0("Running STAR aligner..."))
+mclapply(sampleF, FUN=aligning.fn, mc.cores=cores)
 
-sampleFile2.bam[,1] <- paste0(sampleFile2.bam[,1],"Aligned.sortedByCoord.out.bam")
+sampleFile2.bam[,1] <- paste0(sampleFile2.bam[,1],
+                              "Aligned.sortedByCoord.out.bam")
 sampleFile2.bam[,2] <- gsub("fastqs/||\\.fastq.*", "", sampleFile2.bam[,1])
 colnames(sampleFile2.bam) <- c("FileName", "SampleName")
 write.table(sampleFile2.bam, "sample.bam.txt", quote=F, row.names=F, sep="\t")
@@ -126,8 +141,14 @@ sampleFile2.bam.file <- "sample.bam.txt"
 
 # Create proj file:
 # This will make the BAM files, uses BWA internally
-proj2 <- qAlign(sampleFile2.bam.file, fasta, paired="no", cacheDir="proba", clObj=cl)
+print(paste0("Running qAlign function..."))
+proj2 <- qAlign(sampleFile2.bam.file,
+                fasta,
+                paired="no",
+                cacheDir="proba",
+                clObj=cl)
 
+print(paste0("Loading rtracklayer and GenomicFeatures..."))
 library(rtracklayer)
 library(GenomicFeatures)
 
@@ -138,9 +159,9 @@ cnt <- qCount(proj2, txStart)
 
 # Make dataframe as count table
 setwd("..")
-cnmat<-as.data.frame(cnt, header=TRUE)
+cnmat           <- as.data.frame(cnt, header=TRUE)
 colnames(cnmat) <- gsub("fastqs/", "", colnames(cnmat))
-cnmat$width <- NULL
+cnmat$width     <- NULL
 write.csv(cnmat, "count_table.csv")
 cat("Counts Table Completed\n")
 
@@ -155,6 +176,8 @@ ll          <- rbind(unmapped=unmapped, mapped=three)
 
 write.csv(as.matrix(ll), "mapped_unmapped.csv")
 cat("Mapped/Unmapped Table Completed\n")
+
+sessioninfo::session_info()
 
 #stop logging
 sink()

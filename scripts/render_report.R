@@ -15,43 +15,57 @@ params$exclude_groups <-  NA # Optionally, a vector of groups to exclude from th
 params$include_only_column <- NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
 params$include_only_group <- NA # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
 params$use_cached_RData <- FALSE # If possible, load the saved RData for dds object and gene IDs
-params$cpus <- 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
+params$cpus <- 41 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
 params$run_pathway_analysis <- TRUE
 
-skip_extra <- "DMSO"
+skip_extra <- NA # "DMSO"
 
 # Input file - Rmd
 inputFile <- file.path(params$projectdir, "Rmd", "DESeq2_report.rnaseq.Rmd")
 
 if(is.na(params$group_facet)){
   # Output file - HTML
-  outFile <- file.path(params$projectdir, paste0("reports/RNASeq_analysis_", params$project_name, "_",
-                                                 format(Sys.time(),'%d-%m-%Y.%H.%M'),".html"))
+  outFile <- file.path(params$projectdir, paste0("reports/",
+                                                 params$platform, "_",
+                                                 params$project_name, "_",
+                                                 format(Sys.time(),'%d-%m-%Y.%H.%M'),
+                                                 ".html"))
   rmarkdown::render(input = inputFile,
                     encoding = encoding,
                     output_file = outFile,
                     params = params,
                     envir = new.env())
 } else {
-  SampleKeyFile <- file.path(params$projectdir,"metadata/metadata.QC_applied.txt")
+  SampleKeyFile <- file.path(params$projectdir,
+                             "metadata/metadata.QC_applied.txt")
+  
   DESeqDesign <- read.delim(SampleKeyFile,
                             stringsAsFactors=FALSE,
                             sep="\t",
                             header=TRUE,
                             quote="\"",
-                            row.names=1) # Pick column that is used in ID; might be more appropriate to change this!
+                            row.names=1) # Pick column that is used in ID;
+                            # might be more appropriate to change this!
   DESeqDesign$original_names <- rownames(DESeqDesign)
-  facets <- DESeqDesign %>% filter(!(!!sym(params$group_facet)) %in% c(params$exclude_groups, skip_extra)) %>% 
+  
+  # Remove params$exclude_groups
+  facets <- DESeqDesign %>%
+    filter(!(!!sym(params$group_facet)) %in%
+             c(params$exclude_groups, skip_extra)) %>%
     pull(params$group_facet) %>% 
-    unique() # remove params$exclude_groups
-  message(paste0("Making multiple reports based on ", params$group_facet ,"..."))
+    unique()
+  
+  message(paste0("Making multiple reports based on ",
+                 params$group_facet ,"..."))
   for(i in facets){
     message(paste0("Building report for ", i, "..."))
     params$group_filter <- i
-    outFile <- file.path(params$projectdir, paste0("reports/RNASeq_analysis_", params$project_name, "_",
-                                                   i,
-                                                   "_",
-                                                   format(Sys.time(),'%d-%m-%Y.%H.%M'),".html"))
+    outFile <- file.path(params$projectdir, paste0("reports/",
+                                                   params$platform, "_",
+                                                   params$project_name, "_",
+                                                   i, "_",
+                                                   format(Sys.time(),'%d-%m-%Y.%H.%M'),
+                                                   ".html"))
     rmarkdown::render(input = inputFile,
                       encoding = encoding,
                       output_file = outFile,

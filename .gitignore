@@ -55,6 +55,8 @@ reports
 paths.txt
 *metadata.txt
 *contrasts.txt
-metadata/metadata.txt
-metadata/contrasts.txt
-data/processed/genes.data.tsv
+./metadata*
+./data*
+/metadata/metadata.txt
+/metadata/contrasts.txt
+/data/processed/genes.data.tsv
