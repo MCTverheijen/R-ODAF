@@ -135,7 +135,7 @@ conda activate odaf
 # Trimming single end reads 
 
 if [ ${SEQMODE} == "single" ]; then
-	declare FILES1="${SOURCEDIR}*/*${SUFFIX1}" # Descend into subdirectories
+	declare FILES1="${SOURCEDIR}*${SUFFIX1}"
 for FILENAME in ${FILES1[@]}; do
 	echo -e "[TRIMMING] fastp: [${FILENAME:${#SOURCEDIR}:-${#SUFFIX1}}]" 
 	#Single end
@@ -161,7 +161,7 @@ done; fi
 
 # Trimming paired end reads  
 if [ ${SEQMODE} == "paired" ]; then
-	declare FILES1="${SOURCEDIR}*/*${PAIR1}${SUFFIX1}"; # Descend into subdirectories
+	declare FILES1="${SOURCEDIR}*${PAIR1}${SUFFIX1}";
 	for FILENAME in ${FILES1[@]}; do
 	READ1=${FILENAME}	
 	READ2=${FILENAME:0:-${#SUFFIX1}-${#PAIR1}}${PAIR2}${SUFFIX1}
