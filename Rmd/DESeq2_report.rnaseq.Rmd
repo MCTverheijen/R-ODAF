@@ -4,15 +4,16 @@ params:
   project_name: "Bisphenols"     # Change depending on your project name
   species: "human"                # one of human, mouse, rat, hamster
   design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["group","dose"]           # experimental group of interest plus covariates; can be more than one
+  intgroup: ["group","batch"]           # experimental group of interest plus covariates; can be more than one
+  nuisance: "batch" # To remove batch effects for PCA/Heatmaps visualiziations
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: !r NA          # Which group will this report be done on?
+  group_facet: "chemical" #!r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: "BPA" #!r NA          # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
-  include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
-  include_only_group: 1 # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
+  include_only_column:  !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
+  include_only_group:  !r NA # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
   run_pathway_analysis: TRUE # Optionally disable pathway analysis if not available for your organism
@@ -123,6 +124,7 @@ library('dendextend')
 
 # Bioinformatics-specific
 library('DESeq2')
+library('limma')
 library('edgeR')
 library('enrichplot')
 library('rWikiPathways')
@@ -474,10 +476,23 @@ head(rowRanges(dds))
 str(counts(dds))
 
 # Make regularized log object for later plotting
-#rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
+# rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
 # Use vst for hundreds of samples!
-rld <- vst(dds) # Should this be blind?
- 
+
+if(!is.na(params$nuisance)){
+  rld <- vst(dds, blind=F) # Should this be blind?
+  mat <- assay(rld)
+  condition <- formula(paste0(paste0("~"),
+                              paste0(intgroup[!intgroup %in% nuisance],
+                                     collapse = " + ")))
+  mm <- model.matrix(condition, colData(rld))
+  mat <- limma::removeBatchEffect(mat, batch=rld[[params$nuisance]], design=mm)
+  assay(rld) <- mat
+} else {
+  rld <- vst(dds, blind=F) # Should this be blind?
+}
+
+# rld <- rlog(dds, blind=F)
 ```
 
 The code above (not shown by default) uses DESeq2 `r packageVersion("DESeq2")` to test for deferentially abundant genes within the `r Platform` data.  
@@ -1283,7 +1298,8 @@ This plot shows how samples are clustered based on their euclidean distance usin
 
 ```{r 'heatmap_all_DEGs', collapse=TRUE, fig.height=10}
 
-mat <- assay(rld)[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]
+mat <- assay(rld)[row.names(assay(rld)) %in%
+                                          significantResults[[biomart_filter]],]
 mat <- mat - rowMeans(mat)
 
 heatmap_df <- as.data.frame(colData(rld)[,intgroup, drop=F])
