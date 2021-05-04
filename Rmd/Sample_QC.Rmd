@@ -7,6 +7,7 @@ output:
     code_folding: hide
     theme: spacelab # flatly spacelab sandstone cerulean
     code_download: true
+knit: (function(inputFile, encoding) { rmarkdown::render(inputFile, encoding = encoding, output_file = file.path(here::here(),"reports","Study-wide_Sample_QC.html")) })
 title: "Study-wide sample quality control"
 subtitle: "Bisphenols TempO-Seq"
 author: "Matthew J. Meier"
@@ -30,6 +31,7 @@ clust_method="spearman" # For clustering
 tree_height_cutoff=0.1 # For clustering
 dendro_color_by="group" # Specify how you would like to color the dendrograms
 nmr_threshold=100000 # 10% of 1M reads for TempOSeq = 100,000; 10% of 10M reads for RNA-Seq = 1,000,000.
+align_threshold=0.5 # 50% alignment rate for TempO-Seq Experiments
 gini_cutoff=0.95
 sampledata_sep="," # Comma for TempO-Seq, Maybe tabs for RNASeq, customize!
 groups=list() # Column name(s) in your metadata to use for annotations of experimental groups
@@ -94,27 +96,66 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 # FILES TO LOAD
 ############################################################################
 
-# A. Tab delimited file with merged RSEM.genes.results files:
+# A. File with read counts
 if(Platform=="TempO-Seq") {
-    SampleDataFile <- file.path(paths$processed,"count_table.csv")
+    SampleDataFile <- file.path(paths$output,"count_table.csv")
+    MappedUnmapped <- file.path(paths$output,"mapped_unmapped.csv")
     sampledata_sep <- ","
+    collapse_reps <- function(filepath){
+      df <- read.table(file = filepath,
+                       sep=",",
+                       header=T)
+      names(df) = gsub(pattern = "_trimmed", replacement = "", x = names(df))
+      df <- df %>% pivot_longer(cols = -c("X"),
+                                names_to = c('.value','flowcell'),
+                                names_pattern='(.*)_(.*)')
+      df[is.na(df)] <- 0
+      sampleDataTable <- data.table(df %>% dplyr::select(-c(flowcell)))
+      results <- sampleDataTable[, lapply(.SD,sum), by="X"]
+      return(results)
+    }
+    sampleData <- collapse_reps(SampleDataFile)
+    MappedUnmapped <- collapse_reps(MappedUnmapped)
+    write.table(sampleData,
+                file = file.path(paths$processed,"count_table.csv"),
+                sep=",",
+                quote=F,
+                row.names=F)
+    write.table(MappedUnmapped,
+                file = file.path(paths$processed,"mapped_unmapped.csv"),
+                sep=",",
+                quote=F,
+                row.names=F)
+    sampleData <- read.table(file.path(paths$processed,"count_table.csv"),
+                             sep=sampledata_sep,
+                             stringsAsFactors=FALSE,
+                             header=TRUE,
+                             quote="\"",
+                             row.names=1,
+                             check.names=FALSE)
+    mu <- read.table(file.path(paths$processed,"mapped_unmapped.csv"),
+                     sep=",",
+                     header=T,
+                     row.names=1,
+                     stringsAsFactors = F,
+                     check.names = F)
+    mu <- as.data.frame(t(mu))
+    mu$pct_mapped <- mu$mapped/(mu$mapped + mu$unmapped)
   } else {
     SampleDataFile <- file.path(paths$processed,"genes.data.tsv")
+    sampleData <- read.table(SampleDataFile,
+                             sep=sampledata_sep,
+                             stringsAsFactors=FALSE,
+                             header=TRUE,
+                             quote="\"",
+                             row.names=1,
+                             check.names=FALSE)
   }
 
 # B. Tab delimited sample information file with at least 2 columns:
 #    1. sample names identical to the column names of sampleData
 #    2. compound/group/whatever (needs to identify to which experimental group the sample belongs)
 SampleKeyFile <- file.path(paths$metadata, "metadata.txt")
-
-# Load input files
-sampleData <- read.table(SampleDataFile,
-                         sep=sampledata_sep,
-                         stringsAsFactors=FALSE,
-                         header=TRUE,
-                         quote="\"",
-                         row.names=1,
-                         check.names=FALSE)
 
 DESeqDesign <- read.delim(SampleKeyFile,
                           stringsAsFactors=FALSE,
@@ -502,6 +543,20 @@ print("Samples Flagged:")
 d %>%
   dplyr::filter(original_names %in% failed_read_threshold$Sample) %>%
   dplyr::pull(treatment_var)
+
+if(Platform=="TempO-Seq") {
+  print("TempO-Seq only... Under development")
+  # QAQC$pct_mapped <- 
+  # failed_alignment_threshold <- QAQC[QAQC$pct_mapped < align_threshold,]
+  # 
+  # # Samples failing
+  # print("Samples Flagged:")
+  # d %>%
+  #   dplyr::filter(original_names %in% failed_alignment_threshold$Sample) %>%
+  #   dplyr::pull(treatment_var)
+  } else {
+    next
+  }
 
 ```
 

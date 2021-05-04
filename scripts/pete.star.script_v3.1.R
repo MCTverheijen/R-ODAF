@@ -43,14 +43,24 @@ print(paste0("Creating new temp directories"))
 dir.create("proba")
 dir.create("fastqs")
 print(paste0("Copying FASTQs"))
-#copy_fastqs <- paste0("ln -s ", queryDirectory, "* ./fastqs/")
+
 fastq_paths <- list.files(path=queryDirectory,
                           recursive = F,
                           full.names = T,
                           all.files = F,
                           pattern = "fastq|fq",
                           ignore.case = T)
-copy_fastqs <- paste0("ln -s ", paste(fastq_paths, collapse=' '), " ./fastqs/")
+write.table(fastq_paths,
+            file = "fastq_list.txt",
+            quote = F,
+            row.names = F,
+            col.names = F)
+#copy_fastqs <- paste0("ln -s ", queryDirectory, "* ./fastqs/")
+#copy_fastqs <- paste0("ln -s ", paste(fastq_paths, collapse=' '), " ./fastqs/")
+copy_fastqs <- paste0("cat fastq_list.txt | xargs -I % ln -s % ./fastqs/")
+
+print(head(fastq_paths))
+print(copy_fastqs)
 system(copy_fastqs)
 queryDirectory <- "fastqs/"
 
@@ -68,6 +78,8 @@ print(paste0("Getting list of files"))
 get_files <- paste0("ls ", queryDirectory, "> samplefile.txt")
 append_files <- paste0("sed -e 's|^|", queryDirectory, "|' -i samplefile.txt")
 system(get_files)
+print(get_files)
+print(append_files)
 
 # Add FASTQ path to file name
 system(append_files)
@@ -81,9 +93,11 @@ if(substr(x, (nchar(x)-2),nchar(x))==".gz"){
 # If the FASTQ is gzipped
 cmd.gz <- paste("STAR --genomeDir ",
                 ref_dir,
+                " --genomeLoad LoadAndKeep ",
+                " --limitBAMsortRAM 50000000000 ",
                 " --readFilesIn ", x,
                 " --readFilesCommand zcat ",
-                " --runThreadN 7 ",
+                " --runThreadN ", cores,
                 " --outSAMtype BAM SortedByCoordinate ",
                 " --scoreDelOpen -10000 ",
                 " --scoreInsOpen -10000 ",
@@ -99,8 +113,10 @@ system(cmd.gz)
 # If the FASTQ is not zipped
 cmd.notZipped <- paste("STAR --genomeDir ",
                        ref_dir,
+                       " --genomeLoad LoadAndKeep ",
+                       " --limitBAMsortRAM 50000000000 ",
                        " --readFilesIn ", x,
-                       " --runThreadN 7 ",
+                       " --runThreadN ", cores,
                        " --outSAMtype BAM SortedByCoordinate ",
                        " --scoreDelOpen -10000 ",
                        " --scoreInsOpen -10000 ",
@@ -130,7 +146,7 @@ sampleFile2.bam <- as.data.frame(sampleF)
 
 # Run star Alignment
 print(paste0("Running STAR aligner..."))
-mclapply(sampleF, FUN=aligning.fn, mc.cores=cores)
+parallel::mclapply(sampleF, FUN=aligning.fn, mc.cores=7)
 
 sampleFile2.bam[,1] <- paste0(sampleFile2.bam[,1],
                               "Aligned.sortedByCoord.out.bam")
@@ -155,7 +171,7 @@ library(GenomicFeatures)
 txStart <- import.gff(annotFile, format="gtf")
 names(txStart) <- txStart@seqnames
 
-cnt <- qCount(proj2, txStart)
+cnt <- qCount(proj2, txStart, clObj = cl)
 
 # Make dataframe as count table
 setwd("..")
