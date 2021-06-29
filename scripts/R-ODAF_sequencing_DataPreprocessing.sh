@@ -7,7 +7,7 @@
 #### Settings which need to be adapted by user #####
 ####################################################
 source ${HOME}/miniconda3/etc/profile.d/conda.sh
-project="Default" # $1 # Call script using project name as the only argument
+project="2020_Bisphenols_ESRAB" # $1 # Call script using project name as the only argument
 # Specify the directory for the output
 OUTPUT_DIR="${HOME}/shared/projects/${project}/data/output/"
 # Specify location of input fastq files. ALL FILES IN THE FOLDER WILL BE PROCESSED 
@@ -24,20 +24,23 @@ PAIRED_END_SUFFIX_FORWARD="_R1_001"
 PAIRED_END_SUFFIX_REVERSE="_R2_001"
 
 # Choose the main organism for genome alignment (e.g "Rat_6.0.97"). {NOTE: This ID is a label specific for this script and is made for the user to identify which genome version was used. It can contain any text}.
-# hg38 | Rat_6.0.84 | S1500
-ORGANISM_GENOME_ID="S1500"
+# hg38 | Rat_6.0.84 | S1500 | HumanWT
+ORGANISM_GENOME_ID="HumanWT"
 # PATH/Directory in which the genome files are located
 # ${HOME}/shared/dbs/human/hg38/ | ${HOME}/shared/dbs/rat/ensembl/rnor6_0/v84/genome
 # ${HOME}/shared/dbs/biospyder/R-Scripts/Human_S1500_Surrogate/TSQR_Scripts_Human_Surrogate_1.2/reference/humansurrogate1_2
-GENOME_FILES_DIR="${HOME}/shared/dbs/biospyder/R-Scripts/Human_S1500_Surrogate/TSQR_Scripts_Human_Surrogate_1.2/reference/humansurrogate1_2"
+# ${HOME}/shared/dbs/biospyder/R-Scripts/Human_Whole_Transcriptome/TSQR_Scripts_HumanWT_1.1/reference/humanwt1_1
+GENOME_FILES_DIR="${HOME}/shared/dbs/biospyder/R-Scripts/Human_Whole_Transcriptome/TSQR_Scripts_HumanWT_1.1/reference/humanwt1_1"
 # Filename of genome fasta file (without path)
 # Homo_sapiens_assembly38.fasta | Rnor_6.0.fa 
 # S1500: humansurrogate1_2.fa
-GENOME_FILE_NAME="humansurrogate1_2.fa"
+# Human WT: humanwt1_1.fa
+GENOME_FILE_NAME="humanwt1_1.fa"
 # Filename of GTF file (without path)
 # hg38.ensGene.gtf | Rattus_norvegicus.Rnor_6.0.84.andERCC.gtf
 # S1500: humansurrogate1_2.gtf
-GTF_FILE_NAME="humansurrogate1_2.gtf"
+# Human WT: humanwt1_1.gtf
+GTF_FILE_NAME="humanwt1_1.gtf"
 # Whether the genome indexing has already been done. When "Yes" is specified, the indexing will be skipped. If "No" The index will be made
 GENOME_INDEX_ALREADY_AVAILABLE="Yes" #Specify "Yes" or "No"
 RSEM_INDEX_ALREADY_AVAILABLE="Yes" #Specify "Yes" or "No"
@@ -46,9 +49,9 @@ LARGE_GENOME="Yes"
 
 # System parameters
 # Specify amount of CPUs to use for alignment step (use 20 or 30)
-CPU_FOR_ALIGNMENT=35 
+CPU_FOR_ALIGNMENT=40 
 # Specify amount of CPUs to use (use 6 or higher)
-CPU_FOR_OTHER=35
+CPU_FOR_OTHER=40
 
 ### No other input required ###
 
@@ -123,7 +126,17 @@ exec 1>${OUTPUT_DIR}/log_${mydate}.out 2>&1
 echo $SHELL
 
 echo "Activating required software."
-conda activate odaf
+if [ ${SEQTYPE} == "TempOSeq" ]
+then
+  conda activate odaf
+  #conda activate odaf-star2.7.1 # If genome index is a different version...
+elif [ ${SEQTYPE} == "RNASeq" ]
+then
+  conda activate odaf
+else
+  echo "Sequencing type not recognized. Quitting."
+  break
+fi
 
 ##################################
 ### Trimming raw reads : Fastp ###

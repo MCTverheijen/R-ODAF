@@ -4,15 +4,16 @@ params:
   project_name: "Bisphenols"     # Change depending on your project name
   species: "human"                # one of human, mouse, rat, hamster
   design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["group","dose"]           # experimental group of interest plus covariates; can be more than one
+  intgroup: ["group"]           # experimental group of interest plus covariates; can be more than one
+  nuisance:  !r NA # "batch" # To remove batch effects for PCA/Heatmaps visualiziations
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: !r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: !r NA          # Which group will this report be done on?
+  group_facet: "chemical" #!r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: ["17B-estradiol"] #!r NA # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
-  include_only_column: !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
-  include_only_group: 1 # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
+  include_only_column:  !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
+  include_only_group:  !r NA # Restrict analysis to this/these group(s) within the column listed in params$include_only_column
   use_cached_RData: FALSE # If possible, load the saved RData for dds object and gene IDs
   cpus: 39 # Set to a lower number (e.g., 2 to 4) if you aren't working in a server environment
   run_pathway_analysis: TRUE # Optionally disable pathway analysis if not available for your organism
@@ -26,7 +27,7 @@ output:
     code_download: true
 bibliography: "`r file.path(params$projectdir, 'Rmd/references.bib')`"
 title: "`r paste('Transcriptome analysis:', gsub(pattern='_', replacement = ' ', x=params$project_name))`"
-subtitle: "`r paste(params$platform, 'analysis', ifelse(!is.null(params$group_filter), paste('for', params$group_filter), ''))`"
+subtitle: "`r paste(params$platform, 'analysis', ifelse(!is.null(params$group_filter), paste('for', paste(params$group_filter, collapse=' and ')), ''))`"
 author: "Matthew J. Meier"
 ---
 
@@ -69,7 +70,9 @@ if(is.na(params$group_facet)) {
   paths$DEG_output <- paste0(paths$root, "/DEG_output")
   paths$pathway_analysis <- paste0(paths$DEG_output, "/pathway_analysis")
 } else {
-  paths$DEG_output <- paste0(paths$root, "/DEG_output/group_", params$group_filter)
+  paths$DEG_output <- paste0(paths$root,
+                             "/DEG_output/group_",
+                             paste(params$group_filter, collapse="_"))
   paths$pathway_analysis <- paste0(paths$DEG_output, "/pathway_analysis")
 }
 paths$RData <- paste0(paths$DEG_output, "/RData")
@@ -123,6 +126,7 @@ library('dendextend')
 
 # Bioinformatics-specific
 library('DESeq2')
+library('limma')
 library('edgeR')
 library('enrichplot')
 library('rWikiPathways')
@@ -209,7 +213,10 @@ nHeatmapDEGs <- 50 # Number of DEGs for heatmap
 if(is.na(params$group_filter)){
   analysisID <- paste(format(Sys.time(), '%Y'), params$project_name, sep="_")
 } else {
-  analysisID <- paste(format(Sys.time(), '%Y'), params$project_name, params$group_filter, sep="_")
+  analysisID <- paste(format(Sys.time(), '%Y'),
+                      params$project_name,
+                      paste(params$group_filter, collapse="_"),
+                      sep="_")
 }
 # Specify used platform/technology for data generation:
 Platform <- params$platform # Should be one of "RNA-Seq" or "TempO-Seq"
@@ -280,7 +287,7 @@ DESeqDesignAsRead <- DESeqDesign
 # Note that these should only be run if the respective variables are set.
 if(!is.na(params$group_facet)) {
   contrasts_to_filter <- DESeqDesign %>%
-  dplyr::filter(!!sym(params$group_facet)==params$group_filter) %>%
+  dplyr::filter(!!sym(params$group_facet) %in% params$group_filter) %>%
   pull(params$design) %>% 
   unique()
   contrasts <- contrasts %>% dplyr::filter(V1 %in% contrasts_to_filter)
@@ -308,11 +315,15 @@ if(!is.na(params$include_only_column) & !is.na(params$include_only_group)) {
 }
 
 # If there is a dose column, reorder the contrast list by dose
-# Not necessary by default but might be useful.
-#if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
-#  doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
-#  contrasts <- contrasts # figure out how you want to reorder
-#}
+if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
+  doseCol <- grep(x=colnames(DESeqDesign), pattern="dose", ignore.case = T)
+  ordered_by_dose <- DESeqDesign[order(DESeqDesign[doseCol]),] %>%
+    dplyr::select(params$design) %>%
+    dplyr::pull()
+  contrasts <- contrasts %>%
+    dplyr::slice(match(ordered_by_dose, V1)) %>%
+    unique()
+}
 
 # Once contrasts have been filtered, generate short contrast names for report.
 short_contrast_names <- paste(contrasts$V1,"v.",contrasts$V2) # Customize these for your experiment... Must be short enough to fit as Excel tab titles.
@@ -439,24 +450,34 @@ if (file.exists(file.path(paths$RData, "dds.RData")) & is.na(params$group_facet)
     print("Not identical")
     }
   } else {
-    if(file.exists(file.path(paths$RData, paste0("dds_", params$group_filter, ".RData"))) & !is.na(params$group_facet) & params$use_cached_RData == TRUE) {
-      load(file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
+    if(file.exists(file.path(paths$RData,
+                             paste0("dds_",
+                                    paste(params$group_filter,collapse="_"),
+                                    ".RData"))) & 
+       !is.na(params$group_facet) & 
+       params$use_cached_RData == TRUE) {
+      load(file=file.path(paths$RData,
+                          paste0("dds_",
+                                 paste(params$group_filter,collapse="_"),
+                                 ".RData")))
       } else {
+      current_design <- formula(paste0(paste0("~"),
+                                       paste0(intgroup,collapse = " + ")))
       dds <- DESeqDataSetFromMatrix(countData = round(sampleData),
                                     colData   = as.data.frame(DESeqDesign),
-                                    design    = formula(paste0(paste0("~"),
-                                                            paste0(intgroup,
-                                                                   collapse = " + "))) )
+                                    design    = current_design)
       dds <- dds[,rownames(DESeqDesign)]
       dds <- dds[rowSums(counts(dds)) > 1]
       dds <- DESeq(dds, parallel = TRUE, BPPARAM=MulticoreParam(params$cpus))
       if(is.na(params$group_facet)) {
         save(dds,
              file=file.path(paths$RData, "dds.RData"))
-             
       } else {
         save(dds,
-             file=file.path(paths$RData, paste0("dds_", params$group_filter, ".RData")))
+             file=file.path(paths$RData,
+                            paste0("dds_",
+                                   paste(params$group_filter,collapse="_"),
+                                   ".RData")))
       }
     }
 }
@@ -474,10 +495,23 @@ head(rowRanges(dds))
 str(counts(dds))
 
 # Make regularized log object for later plotting
-#rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
+# rld <- tryCatch(rlog(dds), error = function(e) { rlog(dds, fitType = 'mean') })
 # Use vst for hundreds of samples!
-rld <- vst(dds) # Should this be blind?
- 
+
+if(!is.na(params$nuisance)){
+  rld <- vst(dds, blind=F) # Should this be blind?
+  mat <- assay(rld)
+  condition <- formula(paste0(paste0("~"),
+                              paste0(intgroup[!intgroup %in% params$nuisance],
+                                     collapse = " + ")))
+  mm <- model.matrix(condition, colData(rld))
+  mat <- limma::removeBatchEffect(mat, batch=rld[[params$nuisance]], design=mm)
+  assay(rld) <- mat
+} else {
+  rld <- vst(dds, blind=F) # Should this be blind?
+}
+
+# rld <- rlog(dds, blind=F)
 ```
 
 The code above (not shown by default) uses DESeq2 `r packageVersion("DESeq2")` to test for deferentially abundant genes within the `r Platform` data.  
@@ -688,7 +722,8 @@ for (x in 1:nrow(contrasts)) {	## for all comparisons to be done
 				Check      <- sum(CPMdds[gene, sampleCols] >= MinCount) >= 0.75*SampPerGroup[group]
 				GroupsPass <- c(GroupsPass, Check)
 				if (Check == FALSE) {checkSpike <- c(checkSpike, Check)} else {
-					checkSpike <- c(checkSpike, ((max(Counts[gene, sampleCols]) - median(Counts[gene,sampleCols])) >=
+					checkSpike <- c(checkSpike,
+					                ((max(Counts[gene, sampleCols]) - median(Counts[gene,sampleCols])) >=
 					                             (sum(Counts[gene, sampleCols]) / (SampPerGroup[group]+1))))
 				}
 			}
@@ -763,7 +798,7 @@ The log2FoldChange shrinkage procedure used was `r resList[[1]]@priorInfo$type`.
 #listEnsembl()
 #listMarts()
 #listDatasets(useMart('ensembl'))
-ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "uswest.ensembl.org")
+ensembl <- useMart("ensembl", dataset = ensembl_species,  host = "useast.ensembl.org")
 #listAttributes(ensembl)
 #listFilters(ensembl)
 
@@ -1035,7 +1070,10 @@ saveWorkbook(wb2, paste0("2.",NORM_TYPE,"-DESeq_all.xlsx"), overwrite = TRUE)
 wb3 <- createWorkbook()
 modifyBaseFont(wb3, fontSize = 10, fontName = "Arial Narrow")
 
-short_contrast_names <- stringr::str_trunc(short_contrast_names, 30, side="center")
+short_contrast_names <- stringr::str_trunc(short_contrast_names,
+                                           31,
+                                           side="right",
+                                           ellipsis = "")
 
 for (i in 1:length(levels(factor(allResults$contrast)))) {
   print(i)
@@ -1115,7 +1153,10 @@ These files should be provided to you as a separate zip file.
 if(is.na(params$group_facet)) {
   save.image(file = file.path(paths$RData, "Partial_analysis.RData"))
 } else {
-  save.image(file = file.path(paths$RData, paste0("Partial_analysis_", params$group_filter, ".RData")))
+  save.image(file = file.path(paths$RData,
+                              paste0("Partial_analysis_",
+                                     paste(params$group_filter,collapse="_"),
+                                     ".RData")))
 }
 # Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
 # If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
@@ -1283,7 +1324,8 @@ This plot shows how samples are clustered based on their euclidean distance usin
 
 ```{r 'heatmap_all_DEGs', collapse=TRUE, fig.height=10}
 
-mat <- assay(rld)[row.names(assay(rld)) %in% significantResults[[biomart_filter]],]
+mat <- assay(rld)[row.names(assay(rld)) %in%
+                                          significantResults[[biomart_filter]],]
 mat <- mat - rowMeans(mat)
 
 heatmap_df <- as.data.frame(colData(rld)[,intgroup, drop=F])
@@ -1621,10 +1663,10 @@ Data reported as significant are shown as red points.
 
 ```{r 'volcano-plot', fig.width=12, fig.height=6, warning=TRUE, collapse=TRUE}
 ggplot(allResults, aes(x=log2FoldChange, y=-log10(padj))) +
-  geom_point(size=0.5, alpha=0.4) +
-  geom_point(data=significantResults, size=1.5, alpha=1, color="red") +
+  geom_point(size=0.5, alpha=0.3) +
+  geom_point(data=significantResults, size=0.5, alpha=0.9, color="red") +
   facet_wrap(~contrast, ncol=4) + # , scales="free"
-  geom_vline(xintercept=c(-1.5,1.5), color="red", alpha=1.0)+ 
+  geom_vline(xintercept=c(-log2(1.5),log2(1.5)), color="red", alpha=1.0)+ 
   geom_hline(yintercept=-log10(0.05), color="blue", alpha=1.0) +
   scale_x_continuous(name = "log2 Fold Change", limits = c(-5,5)) + # 
   scale_y_continuous(name = "-log10 adjusted p-value", limits = c(0,6)) # 
@@ -1652,7 +1694,9 @@ if(any(grepl(x=colnames(DESeqDesign), pattern="dose", ignore.case = T))){
   if(!is.na(params$group_facet)) {
     write.table(bmdexpress,
                 file=file.path(paths$DEG_output,
-                               paste0("bmdexpress_input_", params$group_filter, ".txt")),
+                               paste0("bmdexpress_input_",
+                                      paste(params$group_filter,collapse="_"),
+                                      ".txt")),
                 quote = F,
                 sep = "\t",
                 row.names = F,
@@ -1922,10 +1966,14 @@ nocite: '@*'
 Sys.time()
 ```
 
-## Parameters (from the list elements for each params${whatever}) used to generate this report.
+## Parameters Used
+
+From the list elements in each params${variable} used to generate this report.
 
 ```{r paramsList, echo=FALSE}
-knitr::kable(as.data.frame(unlist(params)), format="markdown")
+df <- as.data.frame(unlist(params))
+names(df) <- "Parameter Value"
+knitr::kable(as.data.frame(df), format="markdown")
 ```
 
 ## Wallclock time spent generating the report.
@@ -1951,7 +1999,10 @@ session_info()
 if(is.na(params$group_facet)) {
   save.image(file = file.path(paths$RData, "Complete_analysis.RData"))
 } else {
-  save.image(file = file.path(paths$RData, paste0("Complete_analysis_", params$group_filter, ".RData")))
+  save.image(file = file.path(paths$RData,
+                              paste0("Complete_analysis_",
+                                     paste(params$group_filter,collapse="_"),
+                                     ".RData")))
 }
 # Add a flag to the start of the script with if statements in all code chunks to check if the flag is set.
 # If flag is TRUE, run analysis; if flag is FALSE, SKIP analysis and continue here (just to modify plotting output).
