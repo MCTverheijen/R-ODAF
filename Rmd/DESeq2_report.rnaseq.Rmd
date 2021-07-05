@@ -1,15 +1,15 @@
 ---
 params:
   projectdir: !r here::here() # Can hard code if for some reason you need that
-  project_name: "Bisphenols"     # Change depending on your project name
+  project_name: "GT21"     # Change depending on your project name
   species: "human"                # one of human, mouse, rat, hamster
-  design: "group"             # single experimental group of interest; entries in this column must match the contrast names.
-  intgroup: ["group"]           # experimental group of interest plus covariates; can be more than one
-  nuisance:  !r NA # "batch" # To remove batch effects for PCA/Heatmaps visualiziations
+  design: "Group"             # single experimental group of interest; entries in this column must match the contrast names.
+  intgroup: ["Group"]           # experimental group of interest plus covariates; can be more than one
+  nuisance:  !r NA #"Batch" To remove batch effects for PCA/Heatmaps visualiziations
   flag: TRUE                  # runs all analysis by default when set to TRUE
   platform: "TempO-Seq"         # RNA-Seq or TempO-Seq
-  group_facet: "chemical" #!r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
-  group_filter: ["17B-estradiol"] #!r NA # Which group will this report be done on?
+  group_facet: "Chemical" #!r NA          # If you have many different experimental groups, you may subset the report by specifying a column in the metadata to filter groups, and then setting the group of interest in group_filter
+  group_filter: ["MMS"] #!r NA # Which group will this report be done on?
   exclude_samples: !r NA  # Optionally, a vector of sample names to exclude from the analysis
   exclude_groups: !r NA # Optionally, a vector of groups to exclude from the analysis. By default this is assumed to be in the column specified by params$design.
   include_only_column:  !r NA # Restrict analysis to group(s) in the column listed here based on params$include_only_group.
@@ -147,7 +147,7 @@ if(species=="human"){
   ensembl_species <- "hsapiens_gene_ensembl"
   species_gene_symbol <- "external_gene_name"
   kegg_organism <- "hsa"
-  temposeq_manifest <- "191004_Human_Whole_Transcriptome_2.0_Manifest.txt" # options: "191113_Human_S1500_Surrogate_2.0_Manifest.csv" "191004_Human_Whole_Transcriptome_2.0_Manifest.txt"
+  temposeq_manifest <- "191113_Human_S1500_Surrogate_2.0_Manifest.csv" # options: "191113_Human_S1500_Surrogate_2.0_Manifest.csv" "191004_Human_Whole_Transcriptome_2.0_Manifest.txt"
 } else {
     if(species=="mouse"){
       # Mouse:
@@ -342,7 +342,7 @@ if (Platform=="RNA-Seq"){
   linear_fc_filter = 1.5
   biomart_filter="ensembl_gene_id"
 } else if (Platform=="TempO-Seq") {
-  threshold = 1000000 # Number of aligned reads per sample required
+  threshold = 100000 # Number of aligned reads per sample required
   MinCount<- 0.5
   alpha <- pAdjValue <- 0.05 
   linear_fc_filter = 1.5
@@ -405,7 +405,7 @@ print(NORM_TYPE) # Name of experiment
 # First data clean-up: replace NA & remove samples with total readcount < threshold
 initialSampleDataCount <- ncol(sampleData)
 sampleData[ is.na(sampleData) ] <- 0 
-sampleData <- sampleData[,(colSums(sampleData) > threshold)] # 1 million reads required per sample
+sampleData <- sampleData[,(colSums(sampleData) > threshold)] # reads required per sample
 filteredSampleDataCount <- ncol(sampleData)
 # Sometimes extra cleanup may be needed
 # colnames(sampleData) <- gsub(pattern="^0", replacement="", x=colnames(sampleData))
