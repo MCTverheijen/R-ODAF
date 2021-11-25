@@ -6,7 +6,7 @@ Omics Data Analysis Framework for Regulatory application
 --------------------------------------------------------------  
   **
 THIS PAGE WILL NOT BE UPDATED.
-FOR THE MOST RECENT VERSION, GO TO: https://github.com/fcaiment/R-ODAF**
+FOR THE MOST RECENT VERSION, GO TO: https://github.com/R-ODAF/Main**
 -------------------------------------------------------------------------
   
 Dear future R-ODAF user,
